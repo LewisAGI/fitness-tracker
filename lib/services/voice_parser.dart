@@ -64,6 +64,7 @@ class ParsedSet {
     this.unmatched = false,
     this.muscleGroups = const [],
     this.category,
+    this.rir,
   });
 
   int? exerciseId;
@@ -76,6 +77,7 @@ class ParsedSet {
   bool unmatched;
   List<String> muscleGroups;
   String? category;
+  int? rir;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -102,24 +104,39 @@ class ParsedBlock {
     required this.subtype,
     required this.durationMin,
     required this.rpe,
+    this.spoken,
   });
 
   String subtype;
-  int durationMin;
+  int? durationMin;
   int rpe;
+  String? spoken;
 
-  double get load => durationMin * rpe.toDouble();
+  double get load => (durationMin ?? 0) * rpe.toDouble();
 
-  String get label => switch (subtype) {
-    'technique' => 'Technique',
-    'pads' => 'Pads',
-    'clinch' => 'Clinch',
-    'sparring' => 'Sparring',
-    'conditioning' => 'Conditioning',
-    _ => subtype,
-  };
+  String get label {
+    final name = spoken;
+    if (name != null && name.isNotEmpty) {
+      return name;
+    }
+    return switch (subtype) {
+      'technique' => 'Technique',
+      'pads' => 'Pads',
+      'clinch' => 'Clinch',
+      'sparring' => 'Sparring',
+      'conditioning' => 'Conditioning',
+      'other' => 'Other',
+      _ => subtype,
+    };
+  }
 
-  String get summary => '$label · $durationMin min · RPE $rpe · ${load.round()}';
+  String get summary {
+    final time = durationMin == null ? '?' : '$durationMin min';
+    if (durationMin == null) {
+      return '$label · $time · RPE $rpe';
+    }
+    return '$label · $time · RPE $rpe · ${load.round()}';
+  }
 }
 
 class ParsedSession {
@@ -210,9 +227,10 @@ class ParseResult {
 }
 
 class VoiceParser {
-  VoiceParser(this.exercises);
+  VoiceParser(this.exercises, {this.roundMinutes = 3});
 
   final List<Exercise> exercises;
+  final int roundMinutes;
 
   factory VoiceParser.seeded() => VoiceParser(seedExercises());
 
@@ -225,7 +243,7 @@ class VoiceParser {
         plans: _parsePlans(normalised),
       );
     }
-    final parts = _splitLog(normalised);
+    final parts = _splitEntries(normalised);
     final parsed = <ParsedSession>[];
     Exercise? last = lastExercise;
     for (final part in parts) {
@@ -255,16 +273,16 @@ class VoiceParser {
 
   ParsedSession _parseEntry(String text, Exercise? lastExercise) {
     final blocks = _parseBlocks(text);
-    final thai = _mentionsThai(text) || blocks.isNotEmpty;
-    if (thai) {
-      final duration = blocks.isEmpty
-          ? _durationMinutes(text)
-          : blocks.fold<int>(0, (sum, block) => sum + block.durationMin);
+    if (blocks.isNotEmpty || _mentionsThai(text)) {
+      final stated = _durationMinutes(text);
+      _balanceBlocks(blocks, stated);
+      final thai =
+          _mentionsThai(text) || blocks.any((block) => block.subtype != 'other');
       final explicit = _explicitRpe(text);
       final weighted = blocks.isEmpty ? null : _weightedRpe(blocks);
       return ParsedSession(
-        type: 'muay_thai',
-        durationMin: duration,
+        type: thai ? 'muay_thai' : 'other',
+        durationMin: _sessionMinutes(blocks, stated),
         rpe: explicit ?? weighted ?? _bareIntensity(text),
         blocks: blocks,
         raw: text,
@@ -344,7 +362,6 @@ class VoiceParser {
 
     return ParsedSession(
       type: 'gym',
-      rpe: _explicitRpe(text) ?? _bareIntensity(text),
       raw: text,
       sets: [
         ParsedSet(
@@ -358,6 +375,7 @@ class VoiceParser {
           unmatched: unmatched,
           muscleGroups: exercise?.muscleGroups ?? const [],
           category: exercise?.category,
+          rir: liftRir(text),
         ),
       ],
     );
@@ -366,29 +384,140 @@ class VoiceParser {
   List<ParsedBlock> _parseBlocks(String text) {
     final blocks = <ParsedBlock>[];
     final consumed = List<bool>.filled(text.length, false);
-    final ofRe = RegExp(
-      r'(\d+(?:\.\d+)?)\s*(hours|hour|hrs|hr|minutes|mins|min)\s+of\s+(.+?)(?=(?:\s+and\s+)?\d+(?:\.\d+)?\s*(?:hours|hour|hrs|hr|minutes|mins|min)\s+of\b|$)',
-    );
-    for (final match in ofRe.allMatches(text)) {
-      final subs = _subtypeChunk(match.group(3)!);
-      if (subs.isEmpty) {
-        continue;
-      }
+    final sessionTone = _bareIntensity(text);
+    final subtypeAlt =
+        'technique|tech|pad work|pads|clinching|clinch|sparring|spar|conditioning';
+    final tone = 'easy|light|moderate|hard|heavy|brutal';
+    final subList =
+        '((?:$subtypeAlt)(?:\\s+(?:$tone))?(?:\\s+(?:and|plus|,)\\s+(?:$subtypeAlt)(?:\\s+(?:$tone))?)*)';
+    final unit = 'hours|hour|hrs|hr|minutes|mins|min';
+
+    void take(Match match) {
       for (var i = match.start; i < match.end; i++) {
-        consumed[i] = true;
+        if (i >= 0 && i < consumed.length) {
+          consumed[i] = true;
+        }
       }
-      final minutes = _unitMinutes(match.group(1)!, match.group(2)!);
+    }
+
+    bool free(Match match) {
+      for (var i = match.start; i < match.end; i++) {
+        if (i < consumed.length && consumed[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    void addSubs(List<_SubHit> subs, int minutes) {
+      if (subs.isEmpty) {
+        return;
+      }
       final shares = splitMinutes(minutes, subs.length);
-      final sessionTone = _bareIntensity(text);
       for (var i = 0; i < subs.length; i++) {
         blocks.add(
           ParsedBlock(
             subtype: subs[i].subtype,
             durationMin: shares[i],
-            rpe: subs[i].rpe ?? sessionTone ?? thaiBlockRpe[subs[i].subtype]!,
+            rpe: subs[i].rpe ?? sessionTone ?? thaiBlockRpe[subs[i].subtype] ?? 6,
           ),
         );
       }
+    }
+
+    final ofRe = RegExp(
+      '(\\d+(?:\\.\\d+)?)\\s*($unit)\\s+of\\s+(.+?)(?=(?:\\s+and\\s+)?\\d+(?:\\.\\d+)?\\s*(?:$unit)\\s+of\\b|\$)',
+    );
+    for (final match in ofRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final subs = _subtypeChunk(match.group(3)!);
+      if (subs.isEmpty) {
+        continue;
+      }
+      take(match);
+      addSubs(subs, _unitMinutes(match.group(1)!, match.group(2)!));
+    }
+
+    final roundsRe = RegExp(
+      '\\b(?:($subtypeAlt)\\s+(\\d+)\\s+rounds?\\b|(\\d+)\\s+rounds?\\s+(?:of\\s+)?($subtypeAlt)\\b)',
+    );
+    for (final match in roundsRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final name = match.group(1) ?? match.group(4);
+      final count = int.parse(match.group(2) ?? match.group(3)!);
+      final subtype = _subtypeCanonical[name];
+      if (subtype == null) {
+        continue;
+      }
+      take(match);
+      final perRound = roundMinutes < 1 ? 3 : roundMinutes;
+      blocks.add(
+        ParsedBlock(
+          subtype: subtype,
+          durationMin: count * perRound,
+          rpe: sessionTone ?? thaiBlockRpe[subtype] ?? 6,
+        ),
+      );
+    }
+
+    final forRe = RegExp(
+      '$subList\\s+(?:for\\s+)?(\\d+(?:\\.\\d+)?)\\s*($unit)\\b',
+    );
+    for (final match in forRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final subs = _subtypeChunk(match.group(1)!);
+      if (subs.isEmpty) {
+        continue;
+      }
+      take(match);
+      addSubs(subs, _unitMinutes(match.group(2)!, match.group(3)!));
+    }
+
+    final leadRe = RegExp(
+      '(\\d+(?:\\.\\d+)?)\\s*($unit)\\s+$subList\\b',
+    );
+    for (final match in leadRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final subs = _subtypeChunk(match.group(3)!);
+      if (subs.isEmpty) {
+        continue;
+      }
+      take(match);
+      addSubs(subs, _unitMinutes(match.group(1)!, match.group(2)!));
+    }
+
+    final unknownRe = RegExp(
+      '\\b([a-z][a-z][a-z]+)\\s+(\\d+(?:\\.\\d+)?)\\s*($unit)\\b',
+    );
+    for (final match in unknownRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final word = match.group(1)!;
+      if (_subtypeIn(word) != null || _blockedActivity(word)) {
+        continue;
+      }
+      if (_hasExactExercise(exercises, word)) {
+        continue;
+      }
+      take(match);
+      final minutes = _unitMinutes(match.group(2)!, match.group(3)!);
+      blocks.add(
+        ParsedBlock(
+          subtype: 'other',
+          durationMin: minutes,
+          rpe: sessionTone ?? 6,
+          spoken: _titleWord(word),
+        ),
+      );
     }
 
     final rest = StringBuffer();
@@ -397,32 +526,131 @@ class VoiceParser {
         rest.write(text[i]);
       }
     }
-    final subtypeAlt =
-        'technique|tech|pad work|pads|clinching|clinch|sparring|spar|conditioning';
-    final tone = 'easy|light|moderate|hard|heavy|brutal';
-    final forRe = RegExp(
-      '((?:$subtypeAlt)(?:\\s+(?:$tone))?(?:\\s+(?:and|plus|,)\\s+(?:$subtypeAlt)(?:\\s+(?:$tone))?)*)\\s+(?:for\\s+)?(\\d+(?:\\.\\d+)?)\\s*(hours|hour|hrs|hr|minutes|mins|min)\\b',
-    );
-    final remainder = rest.toString();
-    for (final match in forRe.allMatches(remainder)) {
-      final subs = _subtypeChunk(match.group(1)!);
-      if (subs.isEmpty) {
-        continue;
-      }
-      final minutes = _unitMinutes(match.group(2)!, match.group(3)!);
-      final shares = splitMinutes(minutes, subs.length);
-      final sessionTone = _bareIntensity(text);
-      for (var i = 0; i < subs.length; i++) {
+    final leftover = rest.toString().trim();
+    if (_mentionsSubtype(leftover)) {
+      final subs = _subtypeChunk(leftover);
+      for (final sub in subs) {
         blocks.add(
           ParsedBlock(
-            subtype: subs[i].subtype,
-            durationMin: shares[i],
-            rpe: subs[i].rpe ?? sessionTone ?? thaiBlockRpe[subs[i].subtype]!,
+            subtype: sub.subtype,
+            durationMin: null,
+            rpe: sub.rpe ?? sessionTone ?? thaiBlockRpe[sub.subtype] ?? 6,
           ),
         );
       }
     }
     return blocks;
+  }
+
+  List<String> _splitEntries(String text) {
+    final coarse = text.split(RegExp(r'\s*(?:;|,)\s*'));
+    final glued = <String>[];
+    for (final piece in coarse) {
+      final bit = piece.trim();
+      if (bit.isEmpty) {
+        continue;
+      }
+      if (glued.isNotEmpty && _isContinuation(bit)) {
+        glued[glued.length - 1] = '${glued.last}, $bit';
+      } else {
+        glued.add(bit);
+      }
+    }
+    final parts = <String>[];
+    for (final piece in glued) {
+      parts.addAll(_splitConnectors(piece));
+    }
+    return parts;
+  }
+
+  List<String> _splitConnectors(String text) {
+    if (_keepTogether(text)) {
+      return [text];
+    }
+    final bits = text.split(RegExp(r'\s+(?:and then|then|and)\s+'));
+    if (bits.length == 1) {
+      return [text];
+    }
+    final parts = <String>[];
+    for (final bit in bits) {
+      final trimmed = bit.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      if (parts.isNotEmpty && _isContinuation(trimmed)) {
+        parts[parts.length - 1] = '${parts.last} and $trimmed';
+      } else {
+        parts.add(trimmed);
+      }
+    }
+    return parts;
+  }
+
+  bool _keepTogether(String text) {
+    final thaiLike = _mentionsThai(text) || _mentionsSubtype(text);
+    if (!thaiLike) {
+      return false;
+    }
+    if (_hasForeignExercise(text) || _activityWord(text)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _startsEntry(String text) {
+    if (_mentionsThai(text) || _mentionsSubtype(text) || _activityWord(text)) {
+      return true;
+    }
+    if (_hasExactExercise(exercises, text)) {
+      return true;
+    }
+    return _unknownTimed(text);
+  }
+
+  bool _isContinuation(String text) {
+    if (_startsEntry(text)) {
+      return false;
+    }
+    final stripped = text
+        .replaceAll(
+          RegExp(
+            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|a|half|in|with|the)\b',
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    return stripped.isEmpty;
+  }
+
+  bool _hasForeignExercise(String text) {
+    for (final exercise in exercises) {
+      if (exercise.name == 'Muay Thai') {
+        continue;
+      }
+      final aliases = [exercise.name, ...exercise.aliases];
+      for (final alias in aliases) {
+        final pattern = RegExp('\\b${RegExp.escape(alias.toLowerCase())}\\b');
+        if (pattern.hasMatch(text)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _unknownTimed(String text) {
+    final match = RegExp(
+      r'\b([a-z][a-z][a-z]+)\s+\d+(?:\.\d+)?\s*(?:hours|hour|hrs|hr|minutes|mins|min)\b',
+    ).firstMatch(text);
+    if (match == null) {
+      return false;
+    }
+    final word = match.group(1)!;
+    if (_subtypeIn(word) != null || _blockedActivity(word)) {
+      return false;
+    }
+    return !_hasExactExercise(exercises, word);
   }
 }
 
@@ -469,14 +697,6 @@ bool _hasWeekday(String text) {
     }
   }
   return false;
-}
-
-List<String> _splitLog(String text) {
-  return text
-      .split(RegExp(r'\s*(?:;|and then|then)\s*'))
-      .map((part) => part.trim())
-      .where((part) => part.isNotEmpty)
-      .toList();
 }
 
 List<ParsedPlan> _parsePlans(String text) {
@@ -692,13 +912,46 @@ int? _explicitRpe(String text) {
   return double.parse(match.group(1)!).round().clamp(1, 10);
 }
 
-int _weightedRpe(List<ParsedBlock> blocks) {
-  final minutes = blocks.fold<int>(0, (sum, block) => sum + block.durationMin);
-  if (minutes == 0) {
-    return 7;
+int? _weightedRpe(List<ParsedBlock> blocks) {
+  final timed = [
+    for (final block in blocks)
+      if (block.durationMin != null) block,
+  ];
+  if (timed.isEmpty) {
+    return null;
   }
-  final load = blocks.fold<double>(0, (sum, block) => sum + block.load);
+  final minutes = timed.fold<int>(0, (sum, block) => sum + block.durationMin!);
+  if (minutes == 0) {
+    return null;
+  }
+  final load = timed.fold<double>(0, (sum, block) => sum + block.load);
   return (load / minutes).round();
+}
+
+void _balanceBlocks(List<ParsedBlock> blocks, int? stated) {
+  final missing = [
+    for (final block in blocks)
+      if (block.durationMin == null) block,
+  ];
+  if (missing.isEmpty || stated == null) {
+    return;
+  }
+  final known = blocks.fold<int>(0, (sum, block) => sum + (block.durationMin ?? 0));
+  final pool = stated - known;
+  final shares = splitMinutes(pool < 0 ? 0 : pool, missing.length);
+  for (var i = 0; i < missing.length; i++) {
+    missing[i].durationMin = shares[i];
+  }
+}
+
+int? _sessionMinutes(List<ParsedBlock> blocks, int? stated) {
+  if (blocks.isEmpty) {
+    return stated;
+  }
+  if (blocks.any((block) => block.durationMin == null)) {
+    return null;
+  }
+  return blocks.fold<int>(0, (sum, block) => sum + block.durationMin!);
 }
 
 double? _distanceKm(String text) {
@@ -706,7 +959,7 @@ double? _distanceKm(String text) {
   if (km != null) {
     return double.parse(km.group(1)!);
   }
-  final k = RegExp(r'\b(\d+(?:\.\d+)?)k\b').firstMatch(text);
+  final k = RegExp(r'\b(\d+(?:\.\d+)?)\s*k\b').firstMatch(text);
   if (k != null) {
     return double.parse(k.group(1)!);
   }
@@ -792,10 +1045,26 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     final setsOf = RegExp(
       r'\b(\d+)\s*sets?\s+of\s+(\d+)\b',
     ).firstMatch(text);
+    final repsThenSets = RegExp(
+      r'\b(\d+)\s+reps?\s+(\d+)\s+sets?\b',
+    ).firstMatch(text);
+    final setsThenReps = RegExp(
+      r'\b(\d+)\s+sets?\s+(\d+)\s+reps?\b',
+    ).firstMatch(text);
+    final forSets = RegExp(r'\b(\d+)\s+for\s+(\d+)\b').firstMatch(text);
     final by = RegExp(r'\b(\d+)\s*(?:x|×|by)\s*(\d+)\b').firstMatch(text);
     if (setsOf != null) {
       sets = int.parse(setsOf.group(1)!);
       reps = int.parse(setsOf.group(2)!);
+    } else if (repsThenSets != null) {
+      reps = int.parse(repsThenSets.group(1)!);
+      sets = int.parse(repsThenSets.group(2)!);
+    } else if (setsThenReps != null) {
+      sets = int.parse(setsThenReps.group(1)!);
+      reps = int.parse(setsThenReps.group(2)!);
+    } else if (forSets != null) {
+      sets = int.parse(forSets.group(1)!);
+      reps = int.parse(forSets.group(2)!);
     } else if (by != null) {
       sets = int.parse(by.group(1)!);
       reps = int.parse(by.group(2)!);
@@ -805,7 +1074,7 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
       r'\bat\s+(\d+(?:\.\d+)?)\s*kg\b',
     ).firstMatch(text);
     final kg = RegExp(r'\b(\d+(?:\.\d+)?)\s*kg\b').firstMatch(text);
-    final suffixed = RegExp(r'\b(\d+(?:\.\d+)?)k\b').firstMatch(text);
+    final suffixed = RegExp(r'\b(\d+(?:\.\d+)?)\s*k\b').firstMatch(text);
     final atBare = RegExp(r'\bat\s+(\d+(?:\.\d+)?)\b').firstMatch(text);
     if (atKg != null) {
       weight = double.parse(atKg.group(1)!);
@@ -900,3 +1169,110 @@ int levenshtein(String a, String b) {
 }
 
 bool mentionsSubtype(String text) => _mentionsSubtype(text);
+
+bool _hasExactExercise(List<Exercise> exercises, String text) {
+  for (final exercise in exercises) {
+    final aliases = [exercise.name, ...exercise.aliases];
+    for (final alias in aliases) {
+      final pattern = RegExp('\\b${RegExp.escape(alias.toLowerCase())}\\b');
+      if (pattern.hasMatch(text)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool _blockedActivity(String word) {
+  return RegExp(
+    r'^(?:yoga|run|ran|running|jog|jogged|hike|hiked|hiking|gym|minutes|minute|mins|min|hours|hour|hrs|hr)$',
+  ).hasMatch(word);
+}
+
+bool _activityWord(String text) {
+  return RegExp(
+    r'\b(?:ran|run|running|jog|jogged|hike|hiked|hiking|yoga)\b',
+  ).hasMatch(text);
+}
+
+String _titleWord(String word) {
+  if (word.isEmpty) {
+    return word;
+  }
+  return '${word[0].toUpperCase()}${word.substring(1)}';
+}
+
+int? liftRir(String text) {
+  final explicit = RegExp(r'\brir\s+(\d+)\b').firstMatch(text);
+  if (explicit != null) {
+    return int.parse(explicit.group(1)!);
+  }
+  final rpe = RegExp(r'\brpe\s+(\d+)\b').firstMatch(text);
+  if (rpe != null) {
+    final value = int.parse(rpe.group(1)!);
+    final rir = 10 - value;
+    return rir < 0 ? 0 : rir;
+  }
+  if (RegExp(
+    r'\b(?:near\s+failure|nearly\s+failed|one\s+left|1\s+left)\b',
+  ).hasMatch(text)) {
+    return 1;
+  }
+  if (RegExp(r'\b(?:to\s+failure|failed)\b').hasMatch(text)) {
+    return 0;
+  }
+  if (RegExp(r'\b(?:two\s+left|2\s+left)\b').hasMatch(text)) {
+    return 2;
+  }
+  if (RegExp(r'\b(?:easy|comfortable)\b').hasMatch(text)) {
+    return 3;
+  }
+  return null;
+}
+
+ParseResult sessionToParseResult(Session session) {
+  double? distance;
+  for (final set in session.sets) {
+    if (set.distanceKm != null) {
+      distance = set.distanceKm;
+      break;
+    }
+  }
+  return ParseResult(
+    normalised: session.rawTranscript ?? '',
+    plans: const [],
+    sessions: [
+      ParsedSession(
+        type: session.type,
+        durationMin: session.durationMin,
+        rpe: session.rpe,
+        distanceKm: distance,
+        raw: session.rawTranscript ?? '',
+        sets: [
+          if (session.type == 'gym')
+            for (final set in session.sets)
+              ParsedSet(
+                exerciseId: set.exerciseId,
+                exerciseName: set.exerciseName,
+                sets: set.setCount,
+                reps: set.reps,
+                weightKg: set.weightKg,
+                bodyweight: set.bodyweight,
+                unmatched: set.exerciseId == null,
+                muscleGroups: set.muscleGroups,
+                rir: set.rir,
+              ),
+        ],
+        blocks: [
+          for (final block in session.blocks)
+            ParsedBlock(
+              subtype: block.subtype,
+              durationMin: block.durationMin,
+              rpe: block.rpe,
+              spoken: block.label,
+            ),
+        ],
+      ),
+    ],
+  );
+}

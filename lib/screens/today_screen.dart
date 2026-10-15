@@ -8,7 +8,9 @@ import '../services/speech_capture.dart';
 import '../services/voice_log_flow.dart';
 import '../services/voice_parser.dart';
 import '../theme/app_theme.dart';
+import '../widgets/confirm_action.dart';
 import '../widgets/confirm_card.dart';
+import '../widgets/icon_tip.dart';
 import 'checkin_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -60,7 +62,9 @@ class _TodayScreenState extends State<TodayScreen> {
     );
     setState(() => _listening = true);
     try {
-      await widget.speech.start(onText: (words, _) => _flow?.onSpeech(words));
+      await widget.speech.start(
+        onText: (words, isFinal) => _flow?.onSpeech(words, isFinal: isFinal),
+      );
     } on Object {
       if (mounted) {
         setState(() => _listening = false);
@@ -79,7 +83,10 @@ class _TodayScreenState extends State<TodayScreen> {
     if (mounted) {
       setState(() => _listening = false);
     }
-    final parser = VoiceParser(widget.store.exercises);
+    final parser = VoiceParser(
+      widget.store.exercises,
+      roundMinutes: widget.store.roundMinutes,
+    );
     final result = parser.parse(text, lastExercise: last);
     if (!mounted) {
       return;
@@ -93,6 +100,31 @@ class _TodayScreenState extends State<TodayScreen> {
         onSave: (draft) => widget.store.saveParse(draft),
       ),
     );
+  }
+
+  Future<void> _edit(Session session) async {
+    final result = sessionToParseResult(session);
+    if (!mounted) {
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => ConfirmCard(
+        result: result,
+        exercises: widget.store.exercises,
+        onAlias: widget.store.addAlias,
+        onSave: (draft) => widget.store.replaceSession(session.id, draft),
+        autoSaveAfter: null,
+      ),
+    );
+  }
+
+  Future<void> _delete(Session session) async {
+    final ok = await confirmChoice(context);
+    if (!ok) {
+      return;
+    }
+    await widget.store.deleteSession(session.id);
   }
 
   Future<void> _export(String kind) async {
@@ -198,18 +230,34 @@ class _TodayScreenState extends State<TodayScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      sessionLine(session),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            sessionLine(session),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconTip(
+                          icon: Icons.edit_outlined,
+                          message: 'Edit',
+                          onPressed: () => _edit(session),
+                        ),
+                        IconTip(
+                          icon: Icons.delete_outline,
+                          message: 'Delete',
+                          onPressed: () => _delete(session),
+                        ),
+                      ],
                     ),
                     for (final block in session.blocks)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          '${_block(block.subtype)} · ${block.durationMin} min · RPE ${block.rpe}',
+                          '${block.label ?? _block(block.subtype)} · ${block.durationMin == null ? '?' : '${block.durationMin} min'} · RPE ${block.rpe}',
                         ),
                       ),
                   ],
@@ -266,5 +314,6 @@ String _block(String subtype) => switch (subtype) {
   'clinch' => 'Clinch',
   'sparring' => 'Sparring',
   'conditioning' => 'Conditioning',
+  'other' => 'Other',
   _ => subtype,
 };

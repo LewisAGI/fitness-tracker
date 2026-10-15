@@ -16,6 +16,7 @@ Future<void> main() async {
     },
   );
   final scheduler = CheckInScheduler(notifications);
+  await notifications.requestPermissions();
   await scheduler.reschedule(store.schedule);
   runApp(FitnessApp(store: store, scheduler: scheduler));
 }

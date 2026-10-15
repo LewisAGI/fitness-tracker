@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/store.dart';
 import '../services/dates.dart';
 import '../theme/app_theme.dart';
+import '../widgets/confirm_action.dart';
 import '../widgets/icon_tip.dart';
 import '../widgets/weekly_cards.dart';
 
@@ -143,12 +144,13 @@ class _PlanScreenState extends State<PlanScreen> {
                 Text(warning.evidence),
                 const SizedBox(height: 8),
                 for (final date in warning.evidenceDates)
-                  TextButton(
+                  IconTip(
+                    icon: Icons.event,
+                    message: fmtDay(parseIsoDate(date)),
                     onPressed: () {
                       Navigator.pop(context);
                       _openHistoryDate(date);
                     },
-                    child: Text(fmtDay(parseIsoDate(date))),
                   ),
               ],
               Align(
@@ -200,6 +202,10 @@ class _PlanScreenState extends State<PlanScreen> {
                     icon: Icons.delete_outline,
                     message: 'Remove',
                     onPressed: () async {
+                      final ok = await confirmChoice(context);
+                      if (!ok || !context.mounted) {
+                        return;
+                      }
                       await widget.store.deletePlan(plan.id);
                       if (context.mounted) {
                         Navigator.pop(context);

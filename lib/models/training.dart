@@ -41,6 +41,7 @@ class SetRow {
     this.rpe,
     this.bodyweight = false,
     this.muscleGroups = const [],
+    this.rir,
   });
 
   final int id;
@@ -55,6 +56,7 @@ class SetRow {
   final int? rpe;
   final bool bodyweight;
   final List<String> muscleGroups;
+  final int? rir;
 }
 
 class SessionBlock {
@@ -65,14 +67,16 @@ class SessionBlock {
     required this.durationMin,
     required this.rpe,
     required this.load,
+    this.label,
   });
 
   final int id;
   final int sessionId;
   final String subtype;
-  final int durationMin;
+  final int? durationMin;
   final int rpe;
   final double load;
+  final String? label;
 }
 
 class Session {

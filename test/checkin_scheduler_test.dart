@@ -18,6 +18,16 @@ class RecordingNotifications implements NotificationPort {
     active.removeWhere((existing) => existing.id == slot.id);
     active.add(slot);
   }
+
+  @override
+  Future<void> requestPermissions() async {
+    calls.add('permissions');
+  }
+
+  @override
+  Future<void> refreshTimezone() async {
+    calls.add('timezone');
+  }
 }
 
 void main() {
@@ -67,6 +77,15 @@ void main() {
       port.calls,
       contains('schedule:${CheckInSchedule.eveningId}:20:30:evening'),
     );
+  });
+
+  test('resume refreshes the timezone and reschedules', () async {
+    final port = RecordingNotifications();
+    final scheduler = CheckInScheduler(port);
+    await scheduler.onResume(CheckInSchedule.defaults);
+    expect(port.calls.first, 'timezone');
+    expect(port.calls, contains('schedule:${CheckInSchedule.morningId}:8:0:morning'));
+    expect(port.calls, contains('schedule:${CheckInSchedule.eveningId}:21:0:evening'));
   });
 
   test('turning a check-in back on schedules it again', () async {

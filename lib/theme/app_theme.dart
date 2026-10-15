@@ -24,6 +24,7 @@ ThemeData buildTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    fontFamily: 'Roboto',
     scaffoldBackgroundColor: AppColors.canvas,
     splashColor: AppColors.accentSoft,
     dividerColor: AppColors.hairline,
@@ -35,8 +36,9 @@ ThemeData buildTheme() {
       centerTitle: false,
       titleTextStyle: TextStyle(
         color: AppColors.ink,
+        fontFamily: 'Roboto',
         fontSize: 22,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w500,
       ),
       iconTheme: IconThemeData(color: AppColors.accent),
     ),

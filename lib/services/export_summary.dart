@@ -145,6 +145,7 @@ Map<String, Object?> _sessionJson(Session session) => {
         'distance_km': set.distanceKm,
         'duration_s': set.durationS,
         'rpe': set.rpe,
+        'rir': set.rir,
         'bodyweight': set.bodyweight,
       },
   ],
@@ -156,6 +157,7 @@ Map<String, Object?> _sessionJson(Session session) => {
         'duration_min': block.durationMin,
         'rpe': block.rpe,
         'load': block.load,
+        'label': block.label,
       },
   ],
 };
@@ -208,14 +210,15 @@ String _markdown(
                   : set.weightKg == null
                   ? ''
                   : '${set.weightKg} kg';
-              return '$name ${set.setCount ?? 1}x${set.reps ?? '-'} $load'.trim();
+              final rir = set.rir == null ? '' : ' RIR ${set.rir}';
+              return '$name ${set.setCount ?? 1}x${set.reps ?? '-'} $load$rir'.trim();
             })
             .join('; '),
       if (session.blocks.isNotEmpty)
         session.blocks
             .map(
               (block) =>
-                  '${block.subtype} ${block.durationMin} min RPE ${block.rpe} load ${block.load.round()}',
+                  '${block.label ?? block.subtype} ${block.durationMin ?? '?'} min RPE ${block.rpe} load ${block.load.round()}',
             )
             .join('; '),
     ].join(' ');
@@ -286,7 +289,7 @@ String _markdown(
     ..writeln('`fitness-summary-v1`')
     ..writeln()
     ..writeln(
-      'Sessions have `type` (`gym`, `muay_thai`, `run`, `hike`, `yoga`, `other`), `duration_min`, `rpe`, `sets` (`weight_kg`, `reps`, `set_count`) and `blocks` for Muay Thai (`subtype`, `duration_min`, `rpe`, `load`). Load on a block is duration in minutes times RPE.',
+      'Sessions have `type` (`gym`, `muay_thai`, `run`, `hike`, `yoga`, `other`), `duration_min`, `rpe`, `sets` (`weight_kg`, `reps`, `set_count`, `rir`) and `blocks` for Muay Thai (`subtype`, `duration_min`, `rpe`, `load`, `label`). `rir` is reps in reserve and is null when it was not said. Load on a block is duration in minutes times RPE.',
     )
     ..writeln()
     ..writeln(

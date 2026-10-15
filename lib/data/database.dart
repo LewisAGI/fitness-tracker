@@ -5,11 +5,13 @@ import 'package:sqflite/sqflite.dart';
 
 import 'exercise_seed.dart';
 
+const fitnessSchemaVersion = 2;
+
 Future<Database> openFitnessDatabase({String? path}) async {
   final resolved = path ?? p.join(await getDatabasesPath(), 'fitness.db');
   return openDatabase(
     resolved,
-    version: 1,
+    version: fitnessSchemaVersion,
     onConfigure: (db) async {
       await db.execute('PRAGMA foreign_keys = ON');
     },
@@ -48,6 +50,7 @@ Future<Database> openFitnessDatabase({String? path}) async {
           duration_s INTEGER,
           rpe INTEGER,
           bodyweight INTEGER NOT NULL DEFAULT 0,
+          rir INTEGER,
           FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
         )
       ''');
@@ -56,9 +59,10 @@ Future<Database> openFitnessDatabase({String? path}) async {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           session_id INTEGER NOT NULL,
           subtype TEXT NOT NULL,
-          duration_min INTEGER NOT NULL,
+          duration_min INTEGER,
           rpe INTEGER NOT NULL,
           load REAL NOT NULL,
+          label TEXT,
           FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
         )
       ''');
@@ -155,8 +159,42 @@ Future<Database> openFitnessDatabase({String? path}) async {
         });
       }
       await batch.commit(noResult: true);
+      await db.insert('settings', {'key': 'round_minutes', 'value': '3'});
     },
+    onUpgrade: upgradeFitnessDatabase,
   );
+}
+
+Future<void> upgradeFitnessDatabase(
+  Database db,
+  int oldVersion,
+  int newVersion,
+) async {
+  if (oldVersion < 2) {
+    await db.execute('ALTER TABLE sets ADD COLUMN rir INTEGER');
+    await db.execute('''
+      CREATE TABLE session_blocks_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        subtype TEXT NOT NULL,
+        duration_min INTEGER,
+        rpe INTEGER NOT NULL,
+        load REAL NOT NULL,
+        label TEXT,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      INSERT INTO session_blocks_v2 (id, session_id, subtype, duration_min, rpe, load)
+      SELECT id, session_id, subtype, duration_min, rpe, load FROM session_blocks
+    ''');
+    await db.execute('DROP TABLE session_blocks');
+    await db.execute('ALTER TABLE session_blocks_v2 RENAME TO session_blocks');
+    await db.insert('settings', {
+      'key': 'round_minutes',
+      'value': '3',
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
 }
 
 List<String> decodeStrings(String? raw) {

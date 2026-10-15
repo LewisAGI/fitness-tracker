@@ -150,7 +150,7 @@ void main() {
   test('pounds convert silently to kilograms', () {
     final result = parser.parse('bench press 3 sets of 5 at 100 pounds');
     expect(result.normalised, isNot(contains('pound')));
-    expect(result.sessions.single.sets.single.weightKg, 45.4);
+    expect(result.sessions.single.sets.single.weightKg, 45.5);
   });
 
   test('miles convert silently to kilometres', () {

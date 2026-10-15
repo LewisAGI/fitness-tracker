@@ -174,7 +174,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 Text(sessionLine(session)),
                 for (final block in session.blocks)
                   Text(
-                    '${block.subtype} · ${block.durationMin} min · RPE ${block.rpe}',
+                    '${block.label ?? block.subtype} · ${block.durationMin == null ? '?' : '${block.durationMin} min'} · RPE ${block.rpe}',
                   ),
                 const SizedBox(height: 6),
               ],

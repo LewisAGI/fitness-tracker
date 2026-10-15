@@ -45,6 +45,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _apply(CheckInSchedule next) async {
+    final current = widget.store.schedule;
+    final enabling =
+        (!current.morningEnabled && next.morningEnabled) ||
+        (!current.eveningEnabled && next.eveningEnabled);
+    if (enabling) {
+      await widget.scheduler.requestPermissions();
+    }
     await widget.store.setSchedule(next);
     await widget.scheduler.reschedule(next);
   }
@@ -143,6 +150,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTime: () => _pickTime(morning: false),
           ),
           ListTile(
+            leading: IconTip(
+              icon: Icons.timer_outlined,
+              message: '${widget.store.roundMinutes} min',
+              onPressed: _pickRound,
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.list, color: AppColors.accent),
             title: const Text('Exercises'),
             onTap: () {
@@ -176,18 +190,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
         value: enabled,
         onChanged: onToggle,
       ),
-      trailing: TextButton(
+      trailing: IconTip(
+        icon: Icons.schedule,
+        message: time,
         onPressed: onTime,
-        child: Text(
-          time,
-          style: const TextStyle(
-            color: AppColors.ink,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  Future<void> _pickRound() async {
+    var value = widget.store.roundMinutes;
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconTip(
+                  icon: Icons.remove,
+                  message: 'Less',
+                  onPressed: () => setLocal(() {
+                    if (value > 1) {
+                      value -= 1;
+                    }
+                  }),
+                ),
+                Text(
+                  '$value',
+                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w500),
+                ),
+                IconTip(
+                  icon: Icons.add,
+                  message: 'More',
+                  onPressed: () => setLocal(() {
+                    if (value < 15) {
+                      value += 1;
+                    }
+                  }),
+                ),
+                IconTip(
+                  icon: Icons.check,
+                  message: 'Save',
+                  onPressed: () => Navigator.pop(context, value),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
+    if (picked != null) {
+      await widget.store.setRoundMinutes(picked);
+    }
   }
 }
 

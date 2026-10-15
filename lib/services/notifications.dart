@@ -53,6 +53,30 @@ class LocalNotifications implements NotificationPort {
   }
 
   @override
+  Future<void> requestPermissions() async {
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.requestNotificationsPermission();
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >()
+        ?.requestPermissions(alert: true, badge: false, sound: true);
+  }
+
+  @override
+  Future<void> refreshTimezone() async {
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name));
+    } on Object {
+      tz.setLocalLocation(tz.getLocation('Europe/London'));
+    }
+  }
+
+  @override
   Future<void> cancel(int id) async {
     if (!ready) {
       return;

@@ -24,7 +24,7 @@ flutter run
 
 Speech recognition is on-device British English. It is unreliable on an emulator. Use a phone.
 
-The first launch asks for the microphone and for notifications. Morning check-in defaults to 08:00 and evening to 21:00. Both can be turned off in Settings.
+The first launch asks for the microphone and for notifications. Morning check-in defaults to 08:00 and evening to 21:00. Both can be turned off in Settings. Evening check-ins feed readiness, the same as the morning ones.
 
 Units are kilograms and kilometres. If a log says pounds or miles, the app converts them and does not offer a unit setting.
 

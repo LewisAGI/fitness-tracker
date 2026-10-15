@@ -143,4 +143,55 @@ void main() {
       isNull,
     );
   });
+
+  LiftWeekInput withRir(List<(int, int?)> sets, {bool lower = false, double weight = 80}) {
+    return LiftWeekInput(
+      exerciseName: lower ? 'Back squat' : 'Bench press',
+      muscleGroups: lower
+          ? const ['legs', 'quads']
+          : const ['chest', 'shoulders', 'triceps'],
+      sets: [
+        for (final set in sets)
+          WorkingSet(weightKg: weight, reps: set.$1, rir: set.$2),
+      ],
+    );
+  }
+
+  test('RIR at least 2 on every set steps up inside the rep range', () {
+    final suggestion = suggestLift(withRir([(10, 2), (9, 3)]), clear)!;
+    expect(suggestion.action, OverloadAction.progress);
+    expect(suggestion.card, 'Bench: 80 kg x 10,9 -> 82.5 kg');
+    final squat = suggestLift(
+      withRir([(10, 2), (10, 2)], lower: true, weight: 100),
+      clear,
+    )!;
+    expect(squat.card, 'Squat: 100 kg x 10,10 -> 105 kg');
+  });
+
+  test('failure before the target reps holds', () {
+    final suggestion = suggestLift(withRir([(6, 0), (8, 2)]), clear)!;
+    expect(suggestion.action, OverloadAction.hold);
+    expect(suggestion.card, 'Bench: 80 kg x 6,8 -> hold 80');
+  });
+
+  test('null RIR keeps the existing rep rules', () {
+    final suggestion = suggestLift(withRir([(10, null), (9, 2)]), clear)!;
+    expect(suggestion.action, OverloadAction.keep);
+    expect(suggestion.card, 'Bench: 80 kg x 10,9 -> keep 80, aim 12s');
+  });
+
+  test('failure before target still deloads when readiness and a warning both apply', () {
+    final suggestion = suggestLift(
+      withRir([(6, 0)]),
+      const WeekContext(meanReadiness: 30, warnedMuscles: {'chest'}),
+    )!;
+    expect(suggestion.action, OverloadAction.deload);
+    expect(suggestion.card, 'Bench: 80 kg x 6 -> deload 72.5 kg');
+  });
+
+  test('RIR 2 below the bottom of the range does not step up', () {
+    final suggestion = suggestLift(withRir([(7, 2), (7, 2)]), clear)!;
+    expect(suggestion.action, OverloadAction.keep);
+    expect(suggestion.card, 'Bench: 80 kg x 7,7 -> keep 80, aim 8s');
+  });
 }

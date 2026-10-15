@@ -126,10 +126,10 @@ Future<void> _shoot(WidgetTester tester, GlobalKey boundary, String name) async 
   expect(image.height, _logicalHeight * _pixelRatio);
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
   image.dispose();
-  final directory = Platform.environment['SCREENSHOT_DIR'] ??
-      (Directory('/opt/cursor/artifacts').existsSync()
-          ? '/opt/cursor/artifacts/screenshots'
-          : 'build/screenshots');
+  final override = Platform.environment['SCREENSHOT_DIR'];
+  final directory = override != null && override.isNotEmpty
+      ? override
+      : Directory.systemTemp.createTempSync('fitness-screenshots').path;
   final file = File('$directory/$name.png');
   await file.parent.create(recursive: true);
   await file.writeAsBytes(data!.buffer.asUint8List());

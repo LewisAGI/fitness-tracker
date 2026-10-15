@@ -88,7 +88,7 @@ class _ConfirmCardState extends State<ConfirmCard> {
               const SizedBox(height: 8),
               if (session.type == 'gym')
                 for (final set in session.sets) _setEditor(set),
-              for (final block in session.blocks) _blockEditor(block),
+              for (final block in session.blocks) _blockEditor(session, block),
               const SizedBox(height: 8),
             ],
             for (final plan in widget.result.plans)
@@ -189,12 +189,25 @@ class _ConfirmCardState extends State<ConfirmCard> {
                 setState(() => set.weightKg = value);
               }
             }),
+          IconTip(
+            icon: Icons.speed,
+            message: _rirTip(set.rir),
+            onPressed: () async {
+              _hold();
+              final value = await _pickRir(context, set.rir);
+              if (value == null) {
+                return;
+              }
+              setState(() => set.rir = value.rir);
+            },
+          ),
         ],
       ),
     );
   }
 
-  Widget _blockEditor(ParsedBlock block) {
+  Widget _blockEditor(ParsedSession session, ParsedBlock block) {
+    final time = block.durationMin == null ? '?' : '${block.durationMin} min';
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Wrap(
@@ -205,11 +218,14 @@ class _ConfirmCardState extends State<ConfirmCard> {
             block.label,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
-          _field('${block.durationMin} min', 'Duration', () async {
+          _field(time, 'Duration', () async {
             _hold();
-            final value = await _pickInt(context, block.durationMin, 5, 180);
+            final value = await _pickInt(context, block.durationMin ?? 5, 5, 180);
             if (value != null) {
-              setState(() => block.durationMin = value);
+              setState(() {
+                block.durationMin = value;
+                _syncSession(session);
+              });
             }
           }),
           _field('RPE ${block.rpe}', 'RPE', () async {
@@ -219,9 +235,23 @@ class _ConfirmCardState extends State<ConfirmCard> {
               setState(() => block.rpe = value);
             }
           }),
-          Text('${block.load.round()}'),
+          Text(block.durationMin == null ? '?' : '${block.load.round()}'),
         ],
       ),
+    );
+  }
+
+  void _syncSession(ParsedSession session) {
+    if (session.blocks.isEmpty) {
+      return;
+    }
+    if (session.blocks.any((block) => block.durationMin == null)) {
+      session.durationMin = null;
+      return;
+    }
+    session.durationMin = session.blocks.fold<int>(
+      0,
+      (sum, block) => sum + block.durationMin!,
     );
   }
 
@@ -367,6 +397,47 @@ Future<double?> _pickDouble(BuildContext context, double current, double step) {
             ],
           ),
         ),
+      ),
+    ),
+  );
+}
+
+String _rirTip(int? rir) {
+  if (rir == null) {
+    return 'RIR';
+  }
+  if (rir >= 3) {
+    return 'RIR 3+';
+  }
+  return 'RIR $rir';
+}
+
+class _RirChoice {
+  const _RirChoice(this.rir);
+  final int? rir;
+}
+
+Future<_RirChoice?> _pickRir(BuildContext context, int? current) {
+  const choices = <(String, int?)>[
+    ('0', 0),
+    ('1', 1),
+    ('2', 2),
+    ('3+', 3),
+    ('', null),
+  ];
+  return showDialog<_RirChoice>(
+    context: context,
+    builder: (context) => Dialog(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final choice in choices)
+            ListTile(
+              selected: choice.$2 == current || (choice.$2 == 3 && (current ?? -1) >= 3),
+              title: Text(choice.$1.isEmpty ? '—' : choice.$1),
+              onTap: () => Navigator.pop(context, _RirChoice(choice.$2)),
+            ),
+        ],
       ),
     ),
   );

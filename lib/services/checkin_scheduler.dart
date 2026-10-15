@@ -65,6 +65,8 @@ class ScheduledSlot {
 abstract class NotificationPort {
   Future<void> cancel(int id);
   Future<void> scheduleDaily(ScheduledSlot slot);
+  Future<void> requestPermissions();
+  Future<void> refreshTimezone();
 }
 
 class CheckInScheduler {
@@ -99,5 +101,12 @@ class CheckInScheduler {
       scheduled.add(slot);
     }
     return scheduled;
+  }
+
+  Future<void> requestPermissions() => port.requestPermissions();
+
+  Future<void> onResume(CheckInSchedule schedule) async {
+    await port.refreshTimezone();
+    await reschedule(schedule);
   }
 }

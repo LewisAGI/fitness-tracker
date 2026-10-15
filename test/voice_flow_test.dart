@@ -11,6 +11,8 @@ void main() {
     expect(VoiceEndWord.endsLog('bench press i am done!'), isTrue);
     expect(VoiceEndWord.endsLog('done bench press'), isFalse);
     expect(VoiceEndWord.endsLog('abandoned the set'), isFalse);
+    expect(VoiceEndWord.endsLog("I'm not done"), isFalse);
+    expect(VoiceEndWord.endsLog('well done'), isFalse);
     expect(VoiceEndWord.strip("bench press I'm done").toLowerCase(), 'bench press');
     expect(VoiceEndWord.strip('squats done.').toLowerCase(), 'squats');
   });
@@ -27,7 +29,7 @@ void main() {
     expect(stops, 0);
     expect(confirms, isEmpty);
 
-    flow.onSpeech("bench press 4 sets of 8 at 70 I'm done");
+    flow.onSpeech("bench press 4 sets of 8 at 70 I'm done", isFinal: true);
     expect(stops, 1);
     expect(confirms, hasLength(1));
     expect(confirms.single.toLowerCase(), isNot(contains('done')));
@@ -47,6 +49,21 @@ void main() {
     expect(parsed.sessions.single.distanceKm, 5);
     expect(parsed.sessions.single.durationMin, 28);
     expect(parsed.normalised, isNot(contains('done')));
+  });
+
+  test("I'm not done and well done do not end the log", () {
+    final confirms = <String>[];
+    var stops = 0;
+    final flow = VoiceLogFlow(
+      onStop: () => stops++,
+      onConfirm: confirms.add,
+    );
+    flow.onSpeech("I'm not done", isFinal: true);
+    flow.onSpeech('well done', isFinal: true);
+    flow.onSpeech('done', isFinal: false);
+    flow.onSpeech('done three sets of bench', isFinal: true);
+    expect(stops, 0);
+    expect(confirms, isEmpty);
   });
 
   test('empty release stops without a confirm card', () {

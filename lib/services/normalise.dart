@@ -6,6 +6,9 @@ const milesToKm = 1.609344;
 
 double roundKg(double value) => (value * 10).round() / 10;
 
+/// Pounds land on a 0.5 kg plate. 100 lb is 45.5 kg.
+double roundHalfKg(double value) => (value * 2).round() / 2;
+
 double roundKm(double value) => (value * 100).round() / 100;
 
 String fmtKg(double value) {
@@ -66,16 +69,44 @@ String normaliseTranscript(String input) {
   var text = input.toLowerCase().replaceAll('’', "'").replaceAll('‘', "'");
   text = FillerCleanup.clean(text);
   text = VoiceEndWord.strip(text);
-  text = text.replaceAll(RegExp(r'[.!?]'), ' ');
+  text = text.replaceAllMapped(
+    RegExp(r'(\d)\.(\d)'),
+    (match) => '${match.group(1)}§${match.group(2)}',
+  );
+  text = text.replaceAll(RegExp(r'[.!?]'), ' ; ');
+  text = text.replaceAll('§', '.');
   text = _durationIdioms(text);
   text = _numberWords(text);
   text = _durationIdioms(text);
+  text = text.replaceAllMapped(
+    RegExp(r'\b(\d+)\s+point\s+(\d+)\b'),
+    (match) => '${match.group(1)}.${match.group(2)}',
+  );
+  text = text.replaceAllMapped(RegExp(r'\b(\d+)\s+and\s+a\s+half\b'), (match) {
+    return '${match.group(1)}.5';
+  });
+  text = _corrections(text);
   text = _imperial(text);
   text = text.replaceAll(RegExp(r'\bkilograms?\b|\bkilos?\b|\bkgs\b'), 'kg');
   text = text.replaceAll(RegExp(r'\bkilometres?\b|\bkilometers?\b'), 'km');
   text = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-  text = text.replaceAll(RegExp(r'\s+,') , ',');
+  text = text.replaceAll(RegExp(r'\s+,'), ',');
+  text = text.replaceAll(RegExp(r'(?: ;)+$'), '').trim();
   return text;
+}
+
+String _corrections(String text) {
+  final phrase = RegExp(
+    r'\b\S+\s+(?:no\s+wait|sorry|i\s+mean|actually)\s+',
+  );
+  var current = text;
+  while (true) {
+    final next = current.replaceFirst(phrase, '');
+    if (next == current) {
+      return current;
+    }
+    current = next;
+  }
 }
 
 String _durationIdioms(String text) {
@@ -144,7 +175,7 @@ String _numberWords(String input) {
 String _imperial(String text) {
   text = text.replaceAllMapped(
     RegExp(r'\b(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)\b'),
-    (m) => '${fmtKg(double.parse(m.group(1)!) * poundsToKg)} kg',
+    (m) => '${fmtKg(roundHalfKg(double.parse(m.group(1)!) * poundsToKg))} kg',
   );
   text = text.replaceAllMapped(
     RegExp(r'\b(\d+(?:\.\d+)?)\s*(?:miles?|mi)\b'),

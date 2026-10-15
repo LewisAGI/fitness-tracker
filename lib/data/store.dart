@@ -54,6 +54,7 @@ class Store extends ChangeNotifier {
   Database? _db;
   List<Exercise> exercises = [];
   CheckInSchedule schedule = CheckInSchedule.defaults;
+  int roundMinutes = 3;
 
   DateTime now() => _clock();
 
@@ -61,6 +62,7 @@ class Store extends ChangeNotifier {
     _db = await openFitnessDatabase(path: path);
     exercises = await _readExercises();
     schedule = await _readSchedule();
+    roundMinutes = int.tryParse(await _setting('round_minutes') ?? '') ?? 3;
     notifyListeners();
   }
 
@@ -124,6 +126,13 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setRoundMinutes(int minutes) async {
+    final next = minutes < 1 ? 1 : minutes;
+    roundMinutes = next;
+    await _putSetting('round_minutes', '$next');
+    notifyListeners();
+  }
+
   Future<DayBundle> loadDay(DateTime day) async {
     final date = isoDate(day);
     final sessions = await _sessionsBetween(date, date);
@@ -167,10 +176,72 @@ class Store extends ChangeNotifier {
   Future<void> saveParse(ParseResult result, {DateTime? on}) async {
     final day = dateOnly(on ?? now());
     final time = fmtHm(now().hour, now().minute);
+    await db.transaction((txn) async {
+      await _writeParse(txn, result, isoDate(day), time);
+    });
+    notifyListeners();
+  }
+
+  Future<void> replaceSession(int id, ParseResult result) async {
+    final rows = await db.query(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return;
+    }
+    final date = rows.first['date'] as String;
+    final time = rows.first['start_time'] as String?;
+    await db.transaction((txn) async {
+      await txn.delete('sets', where: 'session_id = ?', whereArgs: [id]);
+      await txn.delete(
+        'session_blocks',
+        where: 'session_id = ?',
+        whereArgs: [id],
+      );
+      if (result.sessions.isEmpty) {
+        await txn.delete('sessions', where: 'id = ?', whereArgs: [id]);
+        return;
+      }
+      final first = result.sessions.first;
+      await txn.update(
+        'sessions',
+        {
+          'type': first.type,
+          'duration_min': first.durationMin,
+          'rpe': first.rpe,
+          'raw_transcript': first.raw,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _writeSessionChildren(txn, id, first);
+      for (final extra in result.sessions.skip(1)) {
+        await _insertSession(txn, extra, date, time);
+      }
+    });
+    notifyListeners();
+  }
+
+  Future<void> deleteSession(int id) async {
+    await db.transaction((txn) async {
+      await txn.delete('sessions', where: 'id = ?', whereArgs: [id]);
+    });
+    notifyListeners();
+  }
+
+  Future<void> _writeParse(
+    DatabaseExecutor txn,
+    ParseResult result,
+    String date,
+    String? time,
+  ) async {
     if (result.plans.isNotEmpty) {
-      final start = weekStart(day);
+      final start = weekStart(parseIsoDate(date));
       for (final plan in result.plans) {
-        await db.insert('plan_items', {
+        await txn.insert('plan_items', {
           'date': isoDate(start.add(Duration(days: plan.weekday - 1))),
           'type': plan.type,
           'muscle_groups': jsonEncode(plan.muscleGroups),
@@ -180,52 +251,68 @@ class Store extends ChangeNotifier {
       }
     }
     for (final session in result.sessions) {
-      final id = await db.insert('sessions', {
-        'date': isoDate(day),
-        'start_time': time,
-        'type': session.type,
-        'duration_min': session.durationMin,
+      await _insertSession(txn, session, date, time);
+    }
+  }
+
+  Future<void> _insertSession(
+    DatabaseExecutor txn,
+    ParsedSession session,
+    String date,
+    String? time,
+  ) async {
+    final id = await txn.insert('sessions', {
+      'date': date,
+      'start_time': time,
+      'type': session.type,
+      'duration_min': session.durationMin,
+      'rpe': session.rpe,
+      'raw_transcript': session.raw,
+    });
+    await _writeSessionChildren(txn, id, session);
+  }
+
+  Future<void> _writeSessionChildren(
+    DatabaseExecutor txn,
+    int id,
+    ParsedSession session,
+  ) async {
+    for (final set in session.sets) {
+      await txn.insert('sets', {
+        'session_id': id,
+        'exercise_id': set.exerciseId,
+        'set_count': set.sets,
+        'reps': set.reps,
+        'weight_kg': set.weightKg,
+        'bodyweight': set.bodyweight ? 1 : 0,
         'rpe': session.rpe,
-        'raw_transcript': session.raw,
+        'rir': set.rir,
       });
-      for (final set in session.sets) {
-        await db.insert('sets', {
-          'session_id': id,
-          'exercise_id': set.exerciseId,
-          'set_count': set.sets,
-          'reps': set.reps,
-          'weight_kg': set.weightKg,
-          'bodyweight': set.bodyweight ? 1 : 0,
-          'rpe': session.rpe,
-        });
-        if (set.exerciseId != null) {
-          await _putSetting('last_exercise_id', '${set.exerciseId}');
-        }
-      }
-      if (session.distanceKm != null && session.sets.isEmpty) {
-        final run = exerciseByName('Run');
-        final hike = exerciseByName('Hike');
-        final idForType = session.type == 'hike' ? hike?.id : run?.id;
-        await db.insert('sets', {
-          'session_id': id,
-          'exercise_id': idForType,
-          'distance_km': session.distanceKm,
-          'duration_s': session.durationMin == null
-              ? null
-              : session.durationMin! * 60,
-        });
-      }
-      for (final block in session.blocks) {
-        await db.insert('session_blocks', {
-          'session_id': id,
-          'subtype': block.subtype,
-          'duration_min': block.durationMin,
-          'rpe': block.rpe,
-          'load': block.load,
-        });
+      if (set.exerciseId != null) {
+        await _putSetting('last_exercise_id', '${set.exerciseId}', txn);
       }
     }
-    notifyListeners();
+    if (session.distanceKm != null && session.sets.isEmpty) {
+      final run = exerciseByName('Run');
+      final hike = exerciseByName('Hike');
+      final idForType = session.type == 'hike' ? hike?.id : run?.id;
+      await txn.insert('sets', {
+        'session_id': id,
+        'exercise_id': idForType,
+        'distance_km': session.distanceKm,
+        'duration_s': session.durationMin == null ? null : session.durationMin! * 60,
+      });
+    }
+    for (final block in session.blocks) {
+      await txn.insert('session_blocks', {
+        'session_id': id,
+        'subtype': block.subtype,
+        'duration_min': block.durationMin,
+        'rpe': block.rpe,
+        'load': block.load,
+        'label': block.spoken,
+      });
+    }
   }
 
   Future<void> addPlan({
@@ -405,7 +492,9 @@ class Store extends ChangeNotifier {
         grouped.putIfAbsent(id, () => []);
         final count = set.setCount ?? 1;
         for (var i = 0; i < count; i++) {
-          grouped[id]!.add(WorkingSet(weightKg: weight, reps: reps));
+          grouped[id]!.add(
+            WorkingSet(weightKg: weight, reps: reps, rir: set.rir),
+          );
         }
         names[id] = exercise.name;
         groups[id] = exercise.muscleGroups;
@@ -499,13 +588,16 @@ class Store extends ChangeNotifier {
     if (decoded is! Map) {
       return;
     }
-    final sessions = decoded['sessions'];
-    if (sessions is List) {
+    await db.transaction((txn) async {
+      final sessions = decoded['sessions'];
+      if (sessions is! List) {
+        return;
+      }
       for (final item in sessions) {
         if (item is! Map) {
           continue;
         }
-        final id = await db.insert('sessions', {
+        final id = await txn.insert('sessions', {
           'date': item['date'],
           'start_time': item['start_time'],
           'type': item['type'] ?? 'other',
@@ -520,7 +612,7 @@ class Store extends ChangeNotifier {
             if (set is! Map) {
               continue;
             }
-            await db.insert('sets', {
+            await txn.insert('sets', {
               'session_id': id,
               'exercise_id': set['exercise_id'],
               'set_count': set['set_count'],
@@ -530,6 +622,7 @@ class Store extends ChangeNotifier {
               'duration_s': set['duration_s'],
               'rpe': set['rpe'],
               'bodyweight': set['bodyweight'] == true ? 1 : 0,
+              'rir': set['rir'],
             });
           }
         }
@@ -539,17 +632,18 @@ class Store extends ChangeNotifier {
             if (block is! Map) {
               continue;
             }
-            await db.insert('session_blocks', {
+            await txn.insert('session_blocks', {
               'session_id': id,
               'subtype': block['subtype'],
-              'duration_min': block['duration_min'] ?? 0,
+              'duration_min': block['duration_min'],
               'rpe': block['rpe'] ?? 0,
               'load': block['load'] ?? 0,
+              'label': block['label'],
             });
           }
         }
       }
-    }
+    });
     notifyListeners();
   }
 
@@ -803,8 +897,12 @@ class Store extends ChangeNotifier {
     return rows.first['value'] as String?;
   }
 
-  Future<void> _putSetting(String key, String value) async {
-    await db.insert('settings', {
+  Future<void> _putSetting(
+    String key,
+    String value, [
+    DatabaseExecutor? exec,
+  ]) async {
+    await (exec ?? db).insert('settings', {
       'key': key,
       'value': value,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -856,6 +954,7 @@ class Store extends ChangeNotifier {
                 durationS: set['duration_s'] as int?,
                 rpe: set['rpe'] as int?,
                 bodyweight: (set['bodyweight'] as int? ?? 0) == 1,
+                rir: set['rir'] as int?,
                 muscleGroups:
                     exerciseById(set['exercise_id'] as int?)?.muscleGroups ??
                     const [],
@@ -867,9 +966,10 @@ class Store extends ChangeNotifier {
                 id: block['id'] as int,
                 sessionId: id,
                 subtype: block['subtype'] as String,
-                durationMin: block['duration_min'] as int,
+                durationMin: block['duration_min'] as int?,
                 rpe: block['rpe'] as int,
-                load: (block['load'] as num).toDouble(),
+                load: (block['load'] as num?)?.toDouble() ?? 0,
+                label: block['label'] as String?,
               ),
           ],
         ),
@@ -1001,7 +1101,7 @@ double loadOf(Session session) {
     ),
     blocks: [
       for (final block in session.blocks)
-        BlockLoad(durationMin: block.durationMin, rpe: block.rpe),
+        BlockLoad(durationMin: block.durationMin ?? 0, rpe: block.rpe),
     ],
   );
 }

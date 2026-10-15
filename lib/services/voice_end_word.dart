@@ -1,7 +1,7 @@
 /// "done" / "I'm done" at the end of a voice log.
 class VoiceEndWord {
   static final _trailing = RegExp(
-    r"""(?:\b(?:i'm|i am|im)\s+)?\bdone\b[\s.!?]*$""",
+    r"""(?<!\bnot\s)(?<!\bwell\s)(?:\b(?:i'm|i am|im)\s+)?\bdone\b[\s.!?]*$""",
     caseSensitive: false,
   );
 

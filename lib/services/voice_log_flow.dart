@@ -10,12 +10,12 @@ class VoiceLogFlow {
   bool finished = false;
   String latest = '';
 
-  void onSpeech(String transcript) {
+  void onSpeech(String transcript, {bool isFinal = false}) {
     latest = transcript;
     if (finished) {
       return;
     }
-    if (VoiceEndWord.endsLog(transcript)) {
+    if (isFinal && VoiceEndWord.endsLog(transcript)) {
       _finish(transcript);
     }
   }

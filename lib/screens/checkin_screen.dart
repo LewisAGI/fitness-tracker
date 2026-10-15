@@ -77,7 +77,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
     setState(() => listening = true);
     try {
       await widget.speech.start(
-        onText: (words, _) => _flow?.onSpeech(words),
+        onText: (words, isFinal) => _flow?.onSpeech(words, isFinal: isFinal),
       );
     } on Object {
       if (mounted) {

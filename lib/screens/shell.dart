@@ -28,7 +28,7 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   var _index = 0;
   late final SpeechCapture _speech = widget.speech ?? SpeechCapture();
   DateTime? _historyDay;
@@ -36,13 +36,22 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.store.pendingSlot.addListener(_onPending);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.store.pendingSlot.removeListener(_onPending);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      widget.scheduler.onResume(widget.store.schedule);
+    }
   }
 
   void _onPending() {

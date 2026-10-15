@@ -4,10 +4,11 @@ import 'normalise.dart';
 enum OverloadAction { progress, keep, hold, deload }
 
 class WorkingSet {
-  const WorkingSet({required this.weightKg, required this.reps});
+  const WorkingSet({required this.weightKg, required this.reps, this.rir});
 
   final double weightKg;
   final int reps;
+  final int? rir;
 }
 
 class LiftWeekInput {
@@ -101,17 +102,23 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   final aim = working.any((set) => set.reps < target.low)
       ? target.low
       : target.high;
+  final failedEarly = working.any(
+    (set) => set.rir == 0 && set.reps < target.low,
+  );
+  final rirStep = working.every(
+    (set) => set.rir != null && set.rir! >= 2 && set.reps >= target.low,
+  );
 
   late final OverloadAction action;
-  late final double nextWeight;
+  late double nextWeight;
   int? aimReps;
   if (lowReady && warned) {
     action = OverloadAction.deload;
-    nextWeight = _roundPlate(workingWeight * 0.9);
-  } else if (lowReady || warned) {
+    nextWeight = workingWeight * 0.9;
+  } else if (lowReady || warned || failedEarly) {
     action = OverloadAction.hold;
     nextWeight = workingWeight;
-  } else if (hitTop) {
+  } else if (hitTop || rirStep) {
     action = OverloadAction.progress;
     nextWeight = workingWeight + increment;
     aimReps = target.low;
@@ -120,6 +127,7 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
     nextWeight = workingWeight;
     aimReps = aim;
   }
+  nextWeight = _roundPlate(nextWeight);
 
   return OverloadSuggestion(
     exerciseId: lift.exerciseId,

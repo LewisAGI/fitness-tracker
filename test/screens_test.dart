@@ -22,6 +22,16 @@ class RecordingNotifications implements NotificationPort {
   Future<void> scheduleDaily(ScheduledSlot slot) async {
     calls.add('schedule:${slot.payload}:${slot.hour}:${slot.minute}');
   }
+
+  @override
+  Future<void> requestPermissions() async {
+    calls.add('permissions');
+  }
+
+  @override
+  Future<void> refreshTimezone() async {
+    calls.add('timezone');
+  }
 }
 
 void main() {
@@ -88,7 +98,7 @@ void main() {
     await _settle(tester);
     expect(find.textContaining('Thai hard'), findsOneWidget);
     expect(find.textContaining('Next-day fatigue 8, 7, 9'), findsOneWidget);
-    await tester.tap(find.text('17 Sep'));
+    await tester.tap(find.byTooltip('17 Sep'));
     await _settle(tester);
     expect(find.text('Sep 2026'), findsOneWidget);
   });
@@ -100,8 +110,8 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('tab-Settings')));
     await _settle(tester);
-    expect(find.text('08:00'), findsOneWidget);
-    expect(find.text('21:00'), findsOneWidget);
+    expect(find.byTooltip('08:00'), findsOneWidget);
+    expect(find.byTooltip('21:00'), findsOneWidget);
     expect(find.textContaining('mile'), findsNothing);
     expect(find.textContaining('pound'), findsNothing);
     expect(find.textContaining('Units'), findsNothing);
