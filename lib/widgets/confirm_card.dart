@@ -8,6 +8,31 @@ import '../services/voice_parser.dart';
 import '../theme/app_theme.dart';
 import 'icon_tip.dart';
 
+/// A flagged field, or a `?`, waits for a tap instead of the 3 second save.
+bool confirmNeedsReview(ParseResult result) {
+  for (final session in result.sessions) {
+    if (session.summary.contains('?')) {
+      return true;
+    }
+    for (final set in session.sets) {
+      if (set.rirFlagged || set.lightBar || set.unmatched || set.summary.contains('?')) {
+        return true;
+      }
+    }
+    for (final block in session.blocks) {
+      if (block.durationMin == null || block.summary.contains('?')) {
+        return true;
+      }
+    }
+  }
+  for (final plan in result.plans) {
+    if (plan.summary.contains('?')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class ConfirmCard extends StatefulWidget {
   const ConfirmCard({
     super.key,
@@ -36,7 +61,7 @@ class _ConfirmCardState extends State<ConfirmCard> {
   void initState() {
     super.initState();
     final delay = widget.autoSaveAfter;
-    if (delay != null) {
+    if (delay != null && !confirmNeedsReview(widget.result)) {
       _timer = Timer(delay, _save);
     }
   }

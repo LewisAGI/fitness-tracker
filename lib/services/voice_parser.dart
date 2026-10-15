@@ -250,7 +250,13 @@ class VoiceParser {
       r'\b(?:lbs?|pounds?|miles?|mi)\b',
       caseSensitive: false,
     ).hasMatch(spoken);
-    final normalised = normaliseTranscript(spoken);
+    final names = <String>[
+      for (final exercise in exercises) ...[
+        exercise.name,
+        ...exercise.aliases,
+      ],
+    ];
+    final normalised = normaliseTranscript(spoken, exercises: names);
     if (_hasWeekday(normalised)) {
       return ParseResult(
         normalised: normalised,
@@ -391,8 +397,9 @@ class VoiceParser {
 
     final heard = liftRir(text);
     final named = heard.setIndex;
-    final outOfRange =
-        named != null && slots.sets != null && named >= slots.sets!;
+    final outOfRange = named != null &&
+        slots.sets != null &&
+        (named < 0 || named >= slots.sets!);
     return ParsedSession(
       type: 'gym',
       raw: text,
@@ -682,7 +689,7 @@ class VoiceParser {
     final stripped = text
         .replaceAll(
           RegExp(
-            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|a|half|in|with|the)\b',
+            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|but|a|half|in|with|the)\b',
           ),
           ' ',
         )
@@ -1384,9 +1391,10 @@ int? _namedSet(String text) {
   final numbered = RegExp(r'\bon\s+(?:the\s+)?set\s+(\d+)\b').firstMatch(text);
   if (numbered != null) {
     final number = int.parse(numbered.group(1)!);
-    if (number >= 1) {
-      return number - 1;
+    if (number < 1) {
+      return -1;
     }
+    return number - 1;
   }
   final ordinal = RegExp(
     r'\b(?:on\s+)?(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+set\b',
@@ -1421,7 +1429,7 @@ bool _lightBarbell(String? name, double? weightKg, bool bodyweight) {
   if (name == null || weightKg == null || bodyweight) {
     return false;
   }
-  return weightKg < 25 && _barbellLifts.contains(name);
+  return weightKg < 20 && _barbellLifts.contains(name);
 }
 
 bool _rirNegated(String text, int index) {
@@ -1431,8 +1439,12 @@ bool _rirNegated(String text, int index) {
   }
   final words = prior.split(RegExp(r'\s+'));
   final start = words.length > 4 ? words.length - 4 : 0;
-  for (var i = start; i < words.length; i++) {
-    final word = words[i].replaceAll(RegExp(r"[^a-z']"), '');
+  for (var i = words.length - 1; i >= start; i--) {
+    final raw = words[i];
+    if (raw == 'but' || raw.contains(',')) {
+      break;
+    }
+    final word = raw.replaceAll(RegExp(r"[^a-z']"), '');
     if (_rirNegationWord(word)) {
       return true;
     }

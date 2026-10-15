@@ -97,6 +97,8 @@ void main() {
     expect(VoiceEndWord.endsLog('not done'), isFalse);
     expect(VoiceEndWord.endsLog('not quite done'), isFalse);
     expect(VoiceEndWord.endsLog('not yet finished'), isFalse);
+    expect(VoiceEndWord.endsLog('not really done'), isFalse);
+    expect(VoiceEndWord.endsLog('not fully done'), isFalse);
     expect(VoiceEndWord.strip('not yet finished'), 'not yet finished');
 
     final confirms = <String>[];

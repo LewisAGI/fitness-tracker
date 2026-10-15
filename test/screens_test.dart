@@ -261,10 +261,28 @@ void main() {
     await _showConfirm(
       tester,
       store,
-      parser.parse('bench 3x8 at 20 kg'),
+      parser.parse('bench 3x8 at 15 kg'),
       autoSave: false,
     );
     expect(find.byTooltip('Bar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('bench 3x8 failed on set 0'),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
+    expect(find.byIcon(Icons.flag), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(tester, store, parser.parse('muay thai sparring'));
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
+    expect(find.text('?'), findsWidgets);
     await tester.tap(find.byTooltip('Discard'));
     await _settle(tester);
 

@@ -68,7 +68,7 @@ class VoiceEndWord {
     if (_numberOrUnit(last)) {
       return false;
     }
-    if (last == 'quite' || last == 'yet') {
+    if (last == 'quite' || last == 'yet' || last == 'really' || last == 'fully') {
       if (words.length < 2) {
         return false;
       }

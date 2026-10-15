@@ -38,6 +38,12 @@ void main() {
     final fourBack = setOf("bench 3x8 at 80 wasn't really all that easy");
     expect(fourBack.rir, isNull);
     expect(fourBack.rirFlagged, isTrue);
+    final acrossBut = setOf('bench 3x8 not easy, but failed');
+    expect(acrossBut.rir, 0);
+    expect(acrossBut.rirFlagged, isFalse);
+    final acrossComma = setOf('bench 3x8 wasn\'t easy, to failure');
+    expect(acrossComma.rir, 0);
+    expect(acrossComma.rirFlagged, isFalse);
   });
 
   test('decimals round down so a fraction cannot step up', () {
@@ -110,6 +116,17 @@ void main() {
     expect(schemeKeepsLoad.sets, 3);
     expect(schemeKeepsLoad.reps, 10);
     expect(schemeKeepsLoad.weightKg, 60);
+
+    final spaced = setOf('bench 3 x 8 at 60 kg I mean 3 x 10');
+    expect(spaced.exerciseName, 'Bench press');
+    expect(spaced.sets, 3);
+    expect(spaced.reps, 10);
+    expect(spaced.weightKg, 60);
+
+    final swappedScheme = setOf('bench 3x8 I mean squat 5x3');
+    expect(swappedScheme.exerciseName, 'Back squat');
+    expect(swappedScheme.sets, 5);
+    expect(swappedScheme.reps, 3);
   });
 
   test('6 rounds of 2 min is 12 minutes', () {
@@ -209,12 +226,49 @@ void main() {
     expect(setOf('bench one oh two point five kilos').weightKg, 102.5);
     expect(setOf('deadlift two twenty kilos').weightKg, 220);
     expect(setOf('bench at two twenty').weightKg, 220);
+    expect(
+      setOf('deadlift 5 x 5 at one forty no wait one fifty').weightKg,
+      150,
+    );
+    expect(
+      setOf('deadlift 5 x 5 at one forty no wait one fifty').sets,
+      5,
+    );
+    expect(
+      setOf('deadlift 5 x 5 at one forty no wait one fifty').reps,
+      5,
+    );
   });
 
-  test('a barbell under 25 kg is flagged', () {
-    expect(setOf('bench 3x8 at 20 kg').lightBar, isTrue);
-    expect(setOf('deadlift 3x5 at 22.5 kg').lightBar, isTrue);
-    expect(setOf('bench 3x8 at 25 kg').lightBar, isFalse);
+  test('a filler correction does not wipe the exercise', () {
+    for (final phrase in [
+      'bench 3 x 8 at 60 kg I mean it was easy',
+      'bench 3 x 8 at 60 kg no wait it was easy',
+    ]) {
+      final set = setOf(phrase);
+      expect(set.exerciseName, 'Bench press', reason: phrase);
+      expect(set.sets, 3, reason: phrase);
+      expect(set.reps, 8, reason: phrase);
+      expect(set.weightKg, 60, reason: phrase);
+      expect(set.rir, 3, reason: phrase);
+    }
+    for (final phrase in [
+      'bench I mean it felt ok 3 x 8 at 60 kg',
+      'bench 3 x 8 I mean at 60 kg',
+    ]) {
+      final set = setOf(phrase);
+      expect(set.exerciseName, 'Bench press', reason: phrase);
+      expect(set.sets, 3, reason: phrase);
+      expect(set.reps, 8, reason: phrase);
+      expect(set.weightKg, 60, reason: phrase);
+    }
+  });
+
+  test('a barbell under 20 kg is flagged', () {
+    expect(setOf('bench 3x8 at 15 kg').lightBar, isTrue);
+    expect(setOf('deadlift 3x5 at 19.5 kg').lightBar, isTrue);
+    expect(setOf('bench 3x8 at 20 kg').lightBar, isFalse);
+    expect(setOf('deadlift 3x5 at 22.5 kg').lightBar, isFalse);
     expect(setOf('curl 3x8 at 12 kg').lightBar, isFalse);
     expect(setOf('bench 3x8 at 80 kg').lightBar, isFalse);
   });
@@ -228,6 +282,10 @@ void main() {
     final fourth = setOf('bench 3x8 failed on the fourth set');
     expect(fourth.rirSetIndex, 3);
     expect(fourth.rirFlagged, isTrue);
+    final zero = setOf('bench 3x8 failed on set 0');
+    expect(zero.rirFlagged, isTrue);
+    expect(zero.rirLastOnly, isFalse);
+    expect(zero.rirSetIndex, -1);
 
     final store = await openStore();
     await store.saveParse(parser.parse('bench 3x8 failed on set 5'));

@@ -65,7 +65,10 @@ const _tens = {
   'ninety': 90,
 };
 
-String normaliseTranscript(String input) {
+String normaliseTranscript(
+  String input, {
+  Iterable<String> exercises = const [],
+}) {
   var text = input.toLowerCase().replaceAll('’', "'").replaceAll('‘', "'");
   text = FillerCleanup.clean(text);
   text = VoiceEndWord.strip(text);
@@ -85,7 +88,11 @@ String normaliseTranscript(String input) {
   text = text.replaceAllMapped(RegExp(r'\b(\d+)\s+and\s+a\s+half\b'), (match) {
     return '${match.group(1)}.5';
   });
-  text = _corrections(text);
+  text = text.replaceAllMapped(
+    RegExp(r'\b(\d+)\s+(x|by)\s+(\d+)\b'),
+    (match) => '${match.group(1)}x${match.group(3)}',
+  );
+  text = _corrections(text, exercises);
   text = _imperial(text);
   text = text.replaceAll(RegExp(r'\bkilograms?\b|\bkilos?\b|\bkgs\b'), 'kg');
   text = text.replaceAll(RegExp(r'\bkilometres?\b|\bkilometers?\b'), 'km');
@@ -95,7 +102,7 @@ String normaliseTranscript(String input) {
   return text;
 }
 
-String _corrections(String text) {
+String _corrections(String text, Iterable<String> exercises) {
   final marker = RegExp(r'\b(?:no\s+wait|sorry|i\s+mean|actually)\s+');
   final name = RegExp(
     r'(?:\b(?!and\b|then\b|of\b|at\b|for\b|the\b|a\b)[a-z][a-z-]*\b\s+)*\b(?!and\b|then\b|of\b|at\b|for\b|the\b|a\b)[a-z][a-z-]*\b\s*$',
@@ -103,6 +110,13 @@ String _corrections(String text) {
   final scheme = RegExp(
     r'(?:\b(?:\d+x\d+|\d+(?:\.\d+)?|sets?|reps?|of|at|x|by|for|kg|k)\b\s*)+$',
   );
+  final newScheme = RegExp(
+    r'^(?:\d+\s*(?:x|by)\s*\d+|\d+x\d+|\d+\s+sets?\s+of\s+\d+|\d+\s+for\s+\d+|\d+\s+reps?\s+\d+\s+sets?|\d+\s+sets?\s+\d+\s+reps?)\b',
+  );
+  final names = [
+    for (final exercise in exercises)
+      if (exercise.trim().isNotEmpty) exercise.toLowerCase(),
+  ];
   var current = text;
   while (true) {
     final match = marker.firstMatch(current);
@@ -112,7 +126,8 @@ String _corrections(String text) {
     final rest = current.substring(match.end);
     final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
     var before = current.substring(0, match.start);
-    if (RegExp(r'^\d+x\d+\b').hasMatch(rest)) {
+    final known = _knownExercise(rest, names);
+    if (RegExp(r'^\d+\s*(?:x|by)\s*\d+\b|^\d+x\d+\b').hasMatch(rest)) {
       final weight = RegExp(
         r'\s*(?:\bat\s+\d+(?:\.\d+)?(?:\s*(?:kg|k|kilos?|pounds?|lbs?|lb))?|\d+(?:\.\d+)?\s*(?:kg|k|kilos?|pounds?|lbs?|lb))\s*$',
       ).firstMatch(before);
@@ -122,12 +137,18 @@ String _corrections(String text) {
         before = before.substring(0, weight.start);
       }
       before = '${before.replaceFirst(scheme, '').trim()} $keptWeight'.trim();
-    } else if (RegExp(r'^[a-z]').hasMatch(token)) {
-      final tail = scheme.firstMatch(before);
-      final head = tail == null ? before : before.substring(0, tail.start);
-      final kept = tail == null ? '' : before.substring(tail.start);
-      before = '${head.replaceFirst(name, '').trim()} ${kept.trim()}'.trim();
-    } else {
+    } else if (known != null) {
+      final after = rest.substring(known.length).trimLeft();
+      if (newScheme.hasMatch(after)) {
+        before = before.replaceFirst(scheme, '');
+        before = before.replaceFirst(name, '');
+      } else {
+        final tail = scheme.firstMatch(before);
+        final head = tail == null ? before : before.substring(0, tail.start);
+        final kept = tail == null ? '' : before.substring(tail.start);
+        before = '${head.replaceFirst(name, '').trim()} ${kept.trim()}'.trim();
+      }
+    } else if (RegExp(r'^\d').hasMatch(token)) {
       final removed = RegExp(r'(\S+)\s*$').firstMatch(before)?.group(1) ?? '';
       before = before.replaceFirst(RegExp(r'\S+\s*$'), '');
       if (RegExp(
@@ -138,6 +159,17 @@ String _corrections(String text) {
     }
     current = '${before.trim()} ${rest.trim()}'.trim();
   }
+}
+
+String? _knownExercise(String rest, List<String> names) {
+  String? best;
+  for (final name in names) {
+    if (RegExp('^${RegExp.escape(name)}\\b').hasMatch(rest) &&
+        (best == null || name.length > best.length)) {
+      best = name;
+    }
+  }
+  return best;
 }
 
 String _durationIdioms(String text) {
@@ -254,42 +286,10 @@ _ReadInt _finishHundred(List<String> tokens, int start, int hundreds, String hun
   return _ReadInt(value, consumed, suffix);
 }
 
-const _weightUnits = {
-  'kg',
-  'kgs',
-  'k',
-  'kilo',
-  'kilos',
-  'kilogram',
-  'kilograms',
-  'pound',
-  'pounds',
-  'lb',
-  'lbs',
-  'point',
-};
-
-bool _weightContext(List<String> tokens, int start) {
-  if (start > 0) {
-    final previous = _splitWord(tokens[start - 1])?.word;
-    if (previous == 'at') {
-      return true;
-    }
-  }
-  for (var i = start; i < tokens.length && i < start + 8; i++) {
-    final word = _splitWord(tokens[i])?.word;
-    if (word != null && _weightUnits.contains(word)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Plate speech: "one oh two" is 102, "two twenty" is 220. Only in a weight.
+/// Plate speech runs with the other number words, before corrections, so
+/// "one forty no wait one fifty" is 140 then 150. "one oh two" is 102 and
+/// "two twenty" is 220.
 _ReadInt? _readPlate(List<String> tokens, int start) {
-  if (!_weightContext(tokens, start)) {
-    return null;
-  }
   final first = _splitWord(tokens[start]);
   if (first == null) {
     return null;

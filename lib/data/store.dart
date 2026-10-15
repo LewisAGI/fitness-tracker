@@ -297,7 +297,7 @@ class Store extends ChangeNotifier {
     for (final set in session.sets) {
       final count = set.sets;
       final named = set.rirSetIndex;
-      if (named != null && count != null && named >= count) {
+      if (named != null && count != null && (named < 0 || named >= count)) {
         await _insertSet(
           txn,
           sessionId: id,
