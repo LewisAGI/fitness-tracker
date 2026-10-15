@@ -366,4 +366,105 @@ void main() {
     expect(parsed.sessions.single.summary, contains('?'));
     expect(confirmNeedsReview(parsed), isTrue);
   });
+
+  test('a rest-only segment joins the gym set', () {
+    final bench = parser.parse('rest 2 then bench 3x8 at 60');
+    expect(bench.sessions, hasLength(1));
+    expect(bench.sessions.single.type, 'gym');
+    expect(bench.sessions.where((session) => session.type == 'other'), isEmpty);
+    final benchSet = bench.sessions.single.sets.single;
+    expect(benchSet.exerciseName, 'Bench press');
+    expect(benchSet.sets, 3);
+    expect(benchSet.reps, 8);
+    expect(benchSet.weightKg, 60);
+    expect(bench.sessions.single.notes, 'rest 2');
+    expect(confirmNeedsReview(bench), isFalse);
+
+    final squat = parser.parse('rest 3 minutes then squat 5x5 100');
+    expect(squat.sessions, hasLength(1));
+    expect(squat.sessions.single.type, 'gym');
+    final squatSet = squat.sessions.single.sets.single;
+    expect(squatSet.exerciseName, 'Back squat');
+    expect(squatSet.sets, 5);
+    expect(squatSet.reps, 5);
+    expect(squatSet.weightKg, 100);
+    expect(squat.sessions.single.notes, 'rest 3 minutes');
+    expect(confirmNeedsReview(squat), isFalse);
+  });
+
+  test('standalone rest is held', () {
+    final seconds = parser.parse('rest 90 seconds');
+    expect(seconds.sessions, hasLength(1));
+    expect(seconds.sessions.single.sets, isEmpty);
+    expect(seconds.sessions.single.notes, 'rest 90 seconds');
+    expect(seconds.sessions.single.summary, contains('?'));
+    expect(seconds.sessions.single.summary, isNot(contains('kg')));
+    expect(confirmNeedsReview(seconds), isTrue);
+
+    final minute = parser.parse('rest one minute');
+    expect(minute.sessions, hasLength(1));
+    expect(minute.sessions.single.sets, isEmpty);
+    expect(minute.sessions.single.notes, 'rest 1 minute');
+    expect(minute.sessions.single.summary, contains('?'));
+    expect(confirmNeedsReview(minute), isTrue);
+  });
+
+  test('plus with no base weight is flagged', () {
+    final parsed = parser.parse('bench 3x8 plus 2.5');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, isNull);
+    expect(set.weightKg, isNot(2.5));
+    expect(set.loadFlagged, isTrue);
+    expect(set.summary, 'Bench press · 3×8 · ?');
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('for N minutes stays a note on the bench set', () {
+    final parsed = parser.parse('bench 3x8 at 60 for 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'gym');
+    expect(parsed.sessions.single.summary, isNot(contains('Other')));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, 60);
+    expect(parsed.sessions.single.notes, 'for 2 minutes');
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('a comma keeps the plate before a rest phrase', () {
+    final parsed = parser.parse('at one forty, rest two minutes');
+    expect(parsed.normalised, contains('140'));
+    expect(parsed.sessions, hasLength(1));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.weightKg, 140);
+    expect(parsed.sessions.single.notes, contains('2 minutes'));
+    expect(set.summary, isNot(contains('1 kg')));
+  });
+
+  test('rest 1 30 is a 90 second note and keeps the weight', () {
+    final parsed = parser.parse('bench 3x8 at 60 rest 1 30');
+    expect(parsed.sessions, hasLength(1));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, 60);
+    expect(parsed.sessions.single.notes, 'rest 90 seconds');
+    expect(set.summary, isNot(contains('30 kg')));
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('rest 5x5 is a scheme and not the note rest 5', () {
+    final parsed = parser.parse('rest 5x5');
+    expect(parsed.sessions.single.notes, isNot('rest 5'));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.sets, 5);
+    expect(set.reps, 5);
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
 }

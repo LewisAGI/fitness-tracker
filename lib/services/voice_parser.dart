@@ -321,7 +321,7 @@ class VoiceParser {
         }
       }
     }
-    final sessions = _mergeGym(parsed);
+    final sessions = _mergeGym(_attachRestOnly(parsed));
     for (final session in sessions) {
       session.raw = spoken;
     }
@@ -341,7 +341,7 @@ class VoiceParser {
         type: 'other',
         notes: noted.notes,
         raw: original,
-        ambiguous: RegExp(r'\brested\b').hasMatch(original),
+        ambiguous: RegExp(r'\b(?:rest|rested|break)\b').hasMatch(original),
       );
     }
     text = noted.text;
@@ -446,6 +446,9 @@ class VoiceParser {
       );
     }
 
+    final timed = _pullForDuration(text);
+    text = timed.text;
+    final liftNotes = _joinNotes(noted.notes, timed.notes);
     final slots = _strengthSlots(text);
     final stray = _strayDigits(text);
     Exercise? exercise = match?.exercise;
@@ -473,13 +476,13 @@ class VoiceParser {
       slots: slots,
       stray: stray,
     );
-    final stolen = _restStoleWeight(original, noted.notes, load.weightKg);
+    final stolen = _restStoleWeight(original, liftNotes, load.weightKg);
     final rejected = exercise != null &&
         _exerciseNegated(text, match?.alias ?? exercise.name);
     return ParsedSession(
       type: 'gym',
       raw: text,
-      notes: noted.notes,
+      notes: liftNotes,
       sets: [
         ParsedSet(
           exerciseId: exercise?.id,
@@ -663,6 +666,9 @@ class VoiceParser {
       if (_subtypeIn(word) != null || _blockedActivity(word)) {
         continue;
       }
+      if (word == 'for' && _forDurationBelongsToLift(text)) {
+        continue;
+      }
       if (_hasExactExercise(exercises, word)) {
         continue;
       }
@@ -809,6 +815,15 @@ class VoiceParser {
       return false;
     }
     return !_hasExactExercise(exercises, word);
+  }
+
+  bool _forDurationBelongsToLift(String text) {
+    if (_hasExactExercise(exercises, text)) {
+      return true;
+    }
+    return RegExp(
+      r'\b\d+\s*x\s*\d+\b|\b\d+\s+sets?\s+of\s+\d+\b',
+    ).hasMatch(text);
   }
 }
 
@@ -1066,14 +1081,15 @@ class _Noted {
   final String? notes;
 }
 
-/// A rest note is one number on a time unit, or `rest N`.
+/// A rest note is one number on a time unit, `rest N`, or `rest M S` (M:SS).
 /// `N rest` does not take the kilograms after `at` or a scheme.
+/// `rest 5x5` is a scheme, not the note `rest 5`.
 _Noted _pullRest(String text) {
   final notes = <String>[];
   var current = text;
   final patterns = <RegExp>[
     RegExp(
-      '\\b(?:rested|rest|break)\\s+\\d+(?:\\.\\d+)?(?:\\s+(?:$_restTimeUnit))?(?!\\s+(?:sets?|reps?|x|by)\\b)',
+      '\\b(?:rested|rest|break)\\s+\\d+(?:\\.\\d+)?(?:\\s+(?:$_restTimeUnit))?(?!\\s*(?:x|×|by)\\s*\\d)(?!\\s+(?:sets?|reps?|x|by)\\b)',
     ),
     RegExp(
       '\\b[1-9]\\s+(?:1[0-9]|[2-9]\\d)\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break))?\\b',
@@ -1087,7 +1103,9 @@ _Noted _pullRest(String text) {
   ];
   var guard = 0;
   while (guard++ < 20) {
-    Match? best;
+    final clock = _clockRest(current);
+    Match? best = clock?.match;
+    var note = clock?.note;
     for (final pattern in patterns) {
       final match = pattern.firstMatch(current);
       if (match == null) {
@@ -1095,21 +1113,57 @@ _Noted _pullRest(String text) {
       }
       if (best == null || match.start < best.start) {
         best = match;
+        note = null;
       }
     }
     final plain = _unprotectedRest(current);
     if (plain != null && (best == null || plain.start < best.start)) {
       best = plain;
+      note = null;
     }
     if (best == null) {
       break;
     }
-    notes.add(best.group(0)!);
+    notes.add(note ?? best.group(0)!);
     current = '${current.substring(0, best.start)} ${current.substring(best.end)}';
   }
   return _Noted(
     current.replaceAll(RegExp(r'\s+'), ' ').trim(),
     notes.isEmpty ? null : notes.join('; '),
+  );
+}
+
+/// `rest 1 30` is one minute and thirty seconds.
+({Match match, String note})? _clockRest(String text) {
+  final match = RegExp(
+    r'\b(rested|rest|break)\s+(\d+)\s+(\d{1,2})\b(?!\s*(?:x|×|by)\s*\d)(?!\s+(?:seconds?|minutes?|secs?|mins?)\b)',
+  ).firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  final minutes = int.parse(match.group(2)!);
+  final seconds = int.parse(match.group(3)!);
+  if (minutes > 15 || seconds >= 60) {
+    return null;
+  }
+  return (
+    match: match,
+    note: '${match.group(1)} ${minutes * 60 + seconds} seconds',
+  );
+}
+
+_Noted _pullForDuration(String text) {
+  final match = RegExp(
+    r'\bfor\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\b',
+  ).firstMatch(text);
+  if (match == null) {
+    return _Noted(text, null);
+  }
+  final current =
+      '${text.substring(0, match.start)} ${text.substring(match.end)}';
+  return _Noted(
+    current.replaceAll(RegExp(r'\s+'), ' ').trim(),
+    match.group(0),
   );
 }
 
@@ -1536,6 +1590,48 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
       bodyweight: bodyweight,
     );
   }
+
+/// A rest-only piece is not its own session. It joins the neighbouring gym
+/// set, or stays as one held card when the utterance is only rest.
+List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
+  final kept = <ParsedSession>[];
+  String? pending;
+  for (final item in items) {
+    if (_isRestOnly(item)) {
+      pending = _joinNotes(pending, item.notes);
+      continue;
+    }
+    if (pending != null && item.type == 'gym') {
+      item.notes = _joinNotes(pending, item.notes);
+      pending = null;
+    } else {
+      pending = null;
+    }
+    kept.add(item);
+  }
+  if (pending != null && kept.isNotEmpty && kept.last.type == 'gym') {
+    kept.last.notes = _joinNotes(kept.last.notes, pending);
+  } else if (pending != null && kept.isEmpty) {
+    kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
+  }
+  return kept;
+}
+
+bool _isRestOnly(ParsedSession session) {
+  if (session.type != 'other' ||
+      session.sets.isNotEmpty ||
+      session.blocks.isNotEmpty ||
+      session.durationMin != null ||
+      session.distanceKm != null ||
+      session.rpe != null) {
+    return false;
+  }
+  final notes = session.notes;
+  if (notes == null || notes.isEmpty) {
+    return false;
+  }
+  return _pullRest(session.raw).text.isEmpty;
+}
 
 List<ParsedSession> _mergeGym(List<ParsedSession> items) {
   final merged = <ParsedSession>[];

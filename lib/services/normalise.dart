@@ -377,6 +377,9 @@ bool _timeUnitFollows(List<String> tokens, int index) {
   if (index >= tokens.length) {
     return false;
   }
+  if (index > 0 && tokens[index - 1].contains(',')) {
+    return false;
+  }
   final word = _splitWord(tokens[index])?.word;
   return word != null && _timeUnits.contains(word);
 }
