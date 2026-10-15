@@ -65,7 +65,7 @@ void main() {
     await tester.drag(find.byType(Slider).at(1), const Offset(80, 0));
     await _settle(tester);
     await tester.tap(find.byTooltip('Save'));
-    await _settle(tester);
+    await _backOnToday(tester);
 
     final morning = await tester.runAsync(() => store.checkInOn('2026-10-12', 'morning'));
     expect(morning, isNotNull);
@@ -77,7 +77,7 @@ void main() {
     expect(find.text('Session feel'), findsOneWidget);
     expect(find.text('Ate well'), findsOneWidget);
     await tester.tap(find.byTooltip('Save'));
-    await _settle(tester);
+    await _backOnToday(tester);
     final evening = await tester.runAsync(() => store.checkInOn('2026-10-12', 'evening'));
     expect(evening, isNotNull);
     expect(find.text('Today'), findsOneWidget);
@@ -277,6 +277,21 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump();
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
   await tester.pumpAndSettle();
+}
+
+/// Check-in save learns patterns on real sqlite time, then pops. A single
+/// short wait can return while that route still covers Today.
+Future<void> _backOnToday(WidgetTester tester) async {
+  final today = find.byKey(const ValueKey('evening-status'));
+  for (var i = 0; i < 40; i++) {
+    await tester.pump();
+    if (today.evaluate().isNotEmpty) {
+      await tester.pumpAndSettle();
+      return;
+    }
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }
+  fail('Check-in did not return to Today');
 }
 
 Future<void> _showConfirm(
