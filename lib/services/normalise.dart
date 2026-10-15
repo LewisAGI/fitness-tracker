@@ -79,6 +79,7 @@ String normaliseTranscript(
   text = text.replaceAll(RegExp(r'[.!?]'), ' ; ');
   text = text.replaceAll('§', '.');
   text = _durationIdioms(text);
+  text = text.replaceAll(RegExp(r'\bheart\s+rate\b[^,;]*?\bbpm\b'), ' ');
   text = _numberWords(text);
   text = _durationIdioms(text);
   text = text.replaceAllMapped(
@@ -339,13 +340,66 @@ const _weightUnits = {
   'lbs',
 };
 
-/// A casual plate ("two twenty", "one oh two") is a weight only when it
-/// follows "at" or sits immediately before kg/kilos (optionally "point five").
+/// A casual plate ("two twenty", "one oh two") is a weight when it follows
+/// "at", sits immediately before kg/kilos, or follows a lift scheme
+/// ("5 by 5 one forty"). It is not a weight in "two twenty minutes".
 bool _weightContext(List<String> tokens, int start, int consumed) {
   if (start > 0 && _splitWord(tokens[start - 1])?.word == 'at') {
     return true;
   }
+  if (_afterScheme(tokens, start)) {
+    return true;
+  }
   return _weightUnitFollows(tokens, start + consumed);
+}
+
+bool _afterScheme(List<String> tokens, int start) {
+  if (start == 0) {
+    return false;
+  }
+  final previous = _schemeToken(tokens[start - 1]);
+  if (previous == null) {
+    return false;
+  }
+  if (RegExp(r'^\d+x\d+$').hasMatch(previous)) {
+    return true;
+  }
+  if (!_isCountWord(previous)) {
+    return false;
+  }
+  var index = start - 2;
+  if (index >= 0) {
+    final mid = _schemeToken(tokens[index]);
+    if (mid == 'rep' || mid == 'reps') {
+      index--;
+    }
+  }
+  if (index < 0) {
+    return false;
+  }
+  final marker = _schemeToken(tokens[index]);
+  return marker == 'x' || marker == 'by' || marker == '×';
+}
+
+/// Letter words, a bare count (`5`), or a compact scheme (`5x5`).
+/// Digit tokens are not words, so the letter splitter misses them.
+String? _schemeToken(String raw) {
+  final split = _splitWord(raw);
+  if (split != null) {
+    return split.word;
+  }
+  final compact = RegExp(r'^(\d+x\d+)$').firstMatch(raw);
+  if (compact != null) {
+    return compact.group(1);
+  }
+  return RegExp(r'^(\d+)$').firstMatch(raw)?.group(1);
+}
+
+bool _isCountWord(String word) {
+  if (RegExp(r'^\d+$').hasMatch(word)) {
+    return true;
+  }
+  return _ones.containsKey(word) || _tens.containsKey(word);
 }
 
 bool _weightUnitFollows(List<String> tokens, int index) {

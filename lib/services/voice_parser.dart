@@ -717,7 +717,7 @@ class VoiceParser {
     final stripped = text
         .replaceAll(
           RegExp(
-            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|but|a|half|in|with|the)\b',
+            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|but|a|half|in|with|the|not|paused|felt)\b',
           ),
           ' ',
         )
@@ -1019,6 +1019,10 @@ bool _strayDigits(String text) {
   rest = rest.replaceAll(RegExp(r'\b\d+\s+reps?\s+\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\s+\d+\s+reps?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+for\s+\d+\b'), ' ');
+  rest = rest.replaceFirst(
+    RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\s+\d+(?:\.\d+)?\b'),
+    ' ',
+  );
   rest = rest.replaceAll(RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\bat\s+\d+(?:\.\d+)?(?:\s*kg)?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+(?:\.\d+)?\s*kg\b'), ' ');
@@ -1233,6 +1237,13 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
       weight = double.parse(suffixed.group(1)!);
     } else if (atBare != null) {
       weight = double.parse(atBare.group(1)!);
+    } else if (by != null) {
+      final bare = RegExp(
+        r'\b\d+\s*(?:x|×|by)\s*\d+\s+(\d+(?:\.\d+)?)\b',
+      ).firstMatch(text);
+      if (bare != null) {
+        weight = double.parse(bare.group(1)!);
+      }
     }
     final bodyweight = RegExp(r'\bbody\s*weight\b|\bbw\b').hasMatch(text);
     return _Slots(
