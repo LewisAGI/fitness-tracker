@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -57,6 +58,35 @@ class Store extends ChangeNotifier {
   int roundMinutes = 3;
   var notificationsDenied = false;
   Future<void> _weekGate = Future<void>.value();
+  var _inflight = 0;
+  final List<Completer<void>> _idle = [];
+
+  /// Completes when screen reloads started by the last change have finished.
+  /// Widget tests await this so a sqflite lock timer is not still pending.
+  Future<void> get settled {
+    if (_inflight == 0) {
+      return Future<void>.value();
+    }
+    final waiter = Completer<void>();
+    _idle.add(waiter);
+    return waiter.future;
+  }
+
+  Future<T> _track<T>(Future<T> future) {
+    _inflight++;
+    return future.whenComplete(() {
+      _inflight--;
+      if (_inflight == 0) {
+        final waiters = List<Completer<void>>.of(_idle);
+        _idle.clear();
+        for (final waiter in waiters) {
+          if (!waiter.isCompleted) {
+            waiter.complete();
+          }
+        }
+      }
+    });
+  }
 
   DateTime now() => _clock();
 
@@ -142,7 +172,11 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<DayBundle> loadDay(DateTime day) async {
+  Future<DayBundle> loadDay(DateTime day) {
+    return _track(_readDay(day));
+  }
+
+  Future<DayBundle> _readDay(DateTime day) async {
     final date = isoDate(day);
     final sessions = await _sessionsBetween(date, date);
     final plans = await _plansBetween(date, date);
@@ -164,7 +198,7 @@ class Store extends ChangeNotifier {
     // the same suggestion row and hit the unique key.
     final run = _weekGate.then((_) => _loadWeek(anchor));
     _weekGate = run.then((_) {}, onError: (Object _, StackTrace _) {});
-    return run;
+    return _track(run);
   }
 
   Future<WeekBundle> _loadWeek(DateTime anchor) async {
@@ -179,7 +213,11 @@ class Store extends ChangeNotifier {
     return WeekBundle(start: start, days: days, suggestions: suggestions);
   }
 
-  Future<Set<String>> markedDays(DateTime month) async {
+  Future<Set<String>> markedDays(DateTime month) {
+    return _track(_readMarkedDays(month));
+  }
+
+  Future<Set<String>> _readMarkedDays(DateTime month) async {
     final start = DateTime(month.year, month.month);
     final end = DateTime(month.year, month.month + 1, 0);
     final sessions = await _sessionsBetween(isoDate(start), isoDate(end));
@@ -415,7 +453,11 @@ class Store extends ChangeNotifier {
     return exerciseById(int.tryParse(raw));
   }
 
-  Future<List<StoredPattern>> patterns() async {
+  Future<List<StoredPattern>> patterns() {
+    return _track(_readPatterns());
+  }
+
+  Future<List<StoredPattern>> _readPatterns() async {
     final rows = await db.query('patterns', orderBy: 'key');
     return rows
         .map(

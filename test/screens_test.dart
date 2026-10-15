@@ -314,6 +314,10 @@ Future<Store> _ready(WidgetTester tester) async {
 Future<void> _pump(WidgetTester tester, Store store, RecordingNotifications port) async {
   await tester.binding.setSurfaceSize(const Size(390, 844));
   addTearDown(() => tester.binding.setSurfaceSize(null));
+  addTearDown(() async {
+    await tester.runAsync(() => store.settled);
+    await tester.pump();
+  });
   await tester.pumpWidget(
     FitnessApp(
       store: store,
