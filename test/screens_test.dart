@@ -1,0 +1,236 @@
+import 'package:fitness_tracker/app.dart';
+import 'package:fitness_tracker/data/store.dart';
+import 'package:fitness_tracker/screens/today_screen.dart';
+import 'package:fitness_tracker/services/checkin_scheduler.dart';
+import 'package:fitness_tracker/services/speech_capture.dart';
+import 'package:fitness_tracker/services/voice_parser.dart';
+import 'package:fitness_tracker/widgets/confirm_card.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'support/harness.dart';
+
+class RecordingNotifications implements NotificationPort {
+  final List<String> calls = [];
+
+  @override
+  Future<void> cancel(int id) async {
+    calls.add('cancel:$id');
+  }
+
+  @override
+  Future<void> scheduleDaily(ScheduledSlot slot) async {
+    calls.add('schedule:${slot.payload}:${slot.hour}:${slot.minute}');
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('today lists the session and both check-in buttons', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Mon 12 Oct'), findsOneWidget);
+    expect(find.text('Gym · legs · hard'), findsOneWidget);
+    expect(find.text('Bench press · 4×8 · 70 kg'), findsWidgets);
+    expect(find.byKey(const ValueKey('morning-status')), findsOneWidget);
+    expect(find.byKey(const ValueKey('evening-status')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mic')), findsOneWidget);
+  });
+
+  testWidgets('morning and evening check-ins open, edit, and save', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+
+    await tester.tap(find.byKey(const ValueKey('morning-status')));
+    await _settle(tester);
+    expect(find.text('Morning'), findsWidgets);
+    expect(find.text('Soreness'), findsOneWidget);
+    expect(find.text('Sleep hours'), findsOneWidget);
+    expect(find.text('2'), findsWidgets);
+
+    await tester.drag(find.byType(Slider).at(1), const Offset(80, 0));
+    await _settle(tester);
+    await tester.tap(find.byTooltip('Save'));
+    await _settle(tester);
+
+    final morning = await tester.runAsync(() => store.checkInOn('2026-10-12', 'morning'));
+    expect(morning, isNotNull);
+    expect(morning!.energy, isNot(5));
+
+    await tester.tap(find.byKey(const ValueKey('evening-status')));
+    await _settle(tester);
+    expect(find.text('Evening'), findsWidgets);
+    expect(find.text('Session feel'), findsOneWidget);
+    expect(find.text('Ate well'), findsOneWidget);
+    await tester.tap(find.byTooltip('Save'));
+    await _settle(tester);
+    final evening = await tester.runAsync(() => store.checkInOn('2026-10-12', 'evening'));
+    expect(evening, isNotNull);
+    expect(find.text('Today'), findsOneWidget);
+  });
+
+  testWidgets('plan shows weekly cards and a warning pop-out', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+
+    await tester.tap(find.byKey(const ValueKey('tab-Plan')));
+    await _settle(tester);
+
+    expect(find.text('12–18 Oct 2026'), findsOneWidget);
+    expect(find.byKey(const ValueKey('weekly-cards')), findsOneWidget);
+    expect(find.text('Bench: 80 kg x 7,7 -> keep 80, aim 8s'), findsOneWidget);
+    expect(find.text('Row: 50 kg x 12,12 -> 52.5 kg'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('warning-2026-10-12')));
+    await _settle(tester);
+    expect(find.textContaining('Thai hard'), findsOneWidget);
+    expect(find.textContaining('Next-day fatigue 8, 7, 9'), findsOneWidget);
+    await tester.tap(find.text('17 Sep'));
+    await _settle(tester);
+    expect(find.text('Sep 2026'), findsOneWidget);
+  });
+
+  testWidgets('settings times reschedule and hide unit choices', (tester) async {
+    final store = await _ready(tester);
+    final port = RecordingNotifications();
+    await _pump(tester, store, port);
+
+    await tester.tap(find.byKey(const ValueKey('tab-Settings')));
+    await _settle(tester);
+    expect(find.text('08:00'), findsOneWidget);
+    expect(find.text('21:00'), findsOneWidget);
+    expect(find.textContaining('mile'), findsNothing);
+    expect(find.textContaining('pound'), findsNothing);
+    expect(find.textContaining('Units'), findsNothing);
+    expect(find.text('lb'), findsNothing);
+
+    port.calls.clear();
+    await tester.tap(find.byKey(const ValueKey('Morning-switch')));
+    await _settle(tester);
+    expect(store.schedule.morningEnabled, isFalse);
+    expect(port.calls, contains('cancel:${CheckInSchedule.morningId}'));
+    expect(
+      port.calls.where((call) => call.startsWith('schedule:morning')),
+      isEmpty,
+    );
+    expect(port.calls, contains('schedule:evening:21:0'));
+  });
+
+  testWidgets('history opens a logged day', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+
+    await tester.tap(find.byKey(const ValueKey('tab-History')));
+    await _settle(tester);
+    expect(find.text('Oct 2026'), findsOneWidget);
+    expect(find.text('Mon'), findsWidgets);
+
+    await tester.tap(find.byKey(const ValueKey('history-2026-10-12')));
+    await _settle(tester);
+    expect(find.text('Mon 12 Oct'), findsWidgets);
+    expect(find.textContaining('Morning ·'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close'));
+    await _settle(tester);
+  });
+
+  testWidgets('confirm card shows a gym set and a Thai combo, then auto-saves', (
+    tester,
+  ) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+    final parser = VoiceParser(store.exercises);
+
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('bench press, 4 sets of 8 at 70 kilos'),
+      autoSave: false,
+    );
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
+    expect(find.text('Bench press · 4×8 · 70 kg'), findsWidgets);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('an hour of technique and pads and 30 minutes of clinch'),
+      autoSave: false,
+    );
+    expect(find.textContaining('Technique'), findsWidgets);
+    expect(find.textContaining('Pads'), findsWidgets);
+    expect(find.textContaining('Clinch'), findsWidgets);
+    await tester.tap(find.byTooltip('Save'));
+    await _settle(tester);
+    final day = await tester.runAsync(() => store.loadDay(DateTime(2026, 10, 12)));
+    expect(day!.sessions.where((session) => session.blocks.length == 3), isNotEmpty);
+
+    final before = (await tester.runAsync(() => store.loadDay(DateTime(2026, 10, 12))))!
+        .sessions
+        .length;
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('squats 5 by 5 100k'),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
+    await _settle(tester);
+    expect(find.byKey(const ValueKey('confirm-card')), findsNothing);
+    final after = (await tester.runAsync(() => store.loadDay(DateTime(2026, 10, 12))))!;
+    expect(after.sessions.length, before + 1);
+    expect(
+      after.sessions.any((session) => sessionLine(session) == 'Back squat · 5×5 · 100 kg'),
+      isTrue,
+    );
+  });
+}
+
+Future<Store> _ready(WidgetTester tester) async {
+  final store = await tester.runAsync(openStore);
+  await tester.runAsync(() => seedDemo(store!));
+  return store!;
+}
+
+Future<void> _pump(WidgetTester tester, Store store, RecordingNotifications port) async {
+  await tester.binding.setSurfaceSize(const Size(390, 844));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(
+    FitnessApp(
+      store: store,
+      scheduler: CheckInScheduler(port),
+      speech: SpeechCapture(),
+    ),
+  );
+  await _settle(tester);
+}
+
+Future<void> _settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _showConfirm(
+  WidgetTester tester,
+  Store store,
+  ParseResult result, {
+  bool autoSave = true,
+}) async {
+  final context = tester.element(find.byType(TodayScreen));
+  showDialog<void>(
+    context: context,
+    builder: (context) => ConfirmCard(
+      result: result,
+      exercises: store.exercises,
+      onAlias: store.addAlias,
+      onSave: (draft) => store.saveParse(draft),
+      autoSaveAfter: autoSave ? const Duration(seconds: 3) : null,
+    ),
+  );
+  await _settle(tester);
+}
+
