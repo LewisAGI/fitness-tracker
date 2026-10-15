@@ -59,8 +59,13 @@ List<Exercise> seedExercises() {
       'pullups',
       'pull ups',
       'pullup',
-    ]),
-    _s('Chin-up', 'strength', ['back', 'biceps'], ['chin-ups', 'chinups', 'chins']),
+    ], bodyweight: true),
+    _s('Chin-up', 'strength', ['back', 'biceps'], [
+      'chin-ups',
+      'chinups',
+      'chin ups',
+      'chins',
+    ], bodyweight: true),
     _s('Lat pulldown', 'strength', ['back', 'biceps'], ['pulldown', 'lat pull']),
     _s('Face pull', 'strength', ['shoulders', 'back'], ['face pulls']),
     _s('Shrug', 'strength', ['traps'], ['shrugs']),
@@ -71,23 +76,24 @@ List<Exercise> seedExercises() {
     _s('Concentration curl', 'strength', ['biceps'], ['concentration curls']),
     _s('Tricep pushdown', 'strength', ['triceps'], ['pushdown', 'pressdown']),
     _s('Skull crusher', 'strength', ['triceps'], ['skull crushers']),
-    _s('Dip', 'strength', ['chest', 'triceps'], ['dips']),
+    _s('Dip', 'strength', ['chest', 'triceps'], ['dips'], bodyweight: true),
     _s('Lateral raise', 'strength', ['shoulders'], ['lat raises', 'side raise']),
     _s('Reverse fly', 'strength', ['shoulders', 'back'], ['rear delt fly']),
     _s('Chest fly', 'strength', ['chest'], ['flyes', 'flies', 'dumbbell fly']),
     _s('Push-up', 'strength', ['chest', 'triceps', 'shoulders'], [
       'push-ups',
       'pushups',
+      'push ups',
       'press-ups',
       'press ups',
-    ]),
+    ], bodyweight: true),
     _s('Leg press', 'strength', ['legs', 'quads', 'glutes'], ['leg presses']),
     _s('Leg curl', 'strength', ['hamstrings'], ['leg curls', 'hamstring curl']),
     _s('Leg extension', 'strength', ['quads'], ['leg extensions']),
     _s('Calf raise', 'strength', ['calves'], ['calf raises', 'calves']),
     _s('Seated calf raise', 'strength', ['calves'], ['seated calves']),
     _s('Hip thrust', 'strength', ['glutes'], ['hip thrusts']),
-    _s('Glute bridge', 'strength', ['glutes'], ['glute bridges']),
+    _s('Glute bridge', 'strength', ['glutes'], ['glute bridges'], bodyweight: true),
     _s('Hip abductor', 'strength', ['glutes'], ['abductor', 'abductions']),
     _s('Hip adductor', 'strength', ['legs'], ['adductor', 'adductions']),
     _s('Lunge', 'strength', ['legs', 'quads', 'glutes'], ['lunges']),
@@ -95,7 +101,10 @@ List<Exercise> seedExercises() {
       'walking lunges',
     ]),
     _s('Step-up', 'strength', ['legs', 'quads', 'glutes'], ['step ups', 'stepups']),
-    _s('Nordic curl', 'strength', ['hamstrings'], ['nordics', 'nordic curls']),
+    _s('Nordic curl', 'strength', ['hamstrings'], [
+      'nordics',
+      'nordic curls',
+    ], bodyweight: true),
     _s('Power clean', 'strength', ['full', 'legs', 'back'], ['cleans', 'power cleans']),
     _s('Hang clean', 'strength', ['full', 'legs', 'back'], ['hang cleans']),
     _s('Snatch', 'strength', ['full', 'legs', 'shoulders'], ['snatches']),
@@ -106,18 +115,21 @@ List<Exercise> seedExercises() {
     ]),
     _s('Farmer carry', 'strength', ['traps', 'core'], ['farmers carry', 'farmer walk']),
     _s('Box jump', 'strength', ['legs'], ['box jumps']),
-    _s('Sit-up', 'strength', ['core'], ['sit-ups', 'situps', 'sit ups']),
-    _s('Plank', 'strength', ['core'], ['planks']),
-    _s('Side plank', 'strength', ['core'], ['side planks']),
-    _s('Hanging leg raise', 'strength', ['core'], ['leg raises']),
+    _s('Sit-up', 'strength', ['core'], ['sit-ups', 'situps', 'sit ups'], bodyweight: true),
+    _s('Plank', 'strength', ['core'], ['planks'], bodyweight: true),
+    _s('Side plank', 'strength', ['core'], ['side planks'], bodyweight: true),
+    _s('Hanging leg raise', 'strength', ['core'], ['leg raises'], bodyweight: true),
     _s('Ab wheel', 'strength', ['core'], ['ab wheel rollouts', 'rollouts']),
     _s('Russian twist', 'strength', ['core'], ['russian twists']),
     _s('Pallof press', 'strength', ['core'], ['pallof']),
-    _s('Toes to bar', 'strength', ['core'], ['t2b', 'toes-to-bar']),
+    _s('Toes to bar', 'strength', ['core'], ['t2b', 'toes-to-bar'], bodyweight: true),
     _s('Wrist curl', 'strength', ['forearms'], ['wrist curls']),
-    _s('Burpee', 'strength', ['full'], ['burpees']),
-    _s('Wall sit', 'strength', ['legs', 'quads'], ['wall sits']),
-    _s('Muscle-up', 'strength', ['back', 'chest', 'triceps'], ['muscle ups', 'muscleups']),
+    _s('Burpee', 'strength', ['full'], ['burpees'], bodyweight: true),
+    _s('Wall sit', 'strength', ['legs', 'quads'], ['wall sits'], bodyweight: true),
+    _s('Muscle-up', 'strength', ['back', 'chest', 'triceps'], [
+      'muscle ups',
+      'muscleups',
+    ], bodyweight: true),
     _s('Run', 'cardio', ['legs'], ['ran', 'running', 'jog', 'jogged']),
     _s('Treadmill', 'cardio', ['legs'], ['treadmill run']),
     _s('Incline walk', 'cardio', ['legs'], ['incline walking']),
@@ -146,17 +158,39 @@ List<Exercise> seedExercises() {
         category: rows[i].category,
         muscleGroups: rows[i].muscles,
         aliases: rows[i].aliases,
+        bodyweight: rows[i].bodyweight,
       ),
   ];
 }
 
 class _Seed {
-  const _Seed(this.name, this.category, this.muscles, this.aliases);
+  const _Seed(
+    this.name,
+    this.category,
+    this.muscles,
+    this.aliases, {
+    this.bodyweight = false,
+  });
   final String name;
   final String category;
   final List<String> muscles;
   final List<String> aliases;
+  final bool bodyweight;
 }
 
-_Seed _s(String name, String category, List<String> muscles, List<String> aliases) =>
-    _Seed(name, category, muscles, aliases);
+bool seededBodyweight(String name) {
+  for (final exercise in seedExercises()) {
+    if (exercise.name == name) {
+      return exercise.bodyweight;
+    }
+  }
+  return false;
+}
+
+_Seed _s(
+  String name,
+  String category,
+  List<String> muscles,
+  List<String> aliases, {
+  bool bodyweight = false,
+}) => _Seed(name, category, muscles, aliases, bodyweight: bodyweight);

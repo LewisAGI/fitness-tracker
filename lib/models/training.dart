@@ -6,6 +6,7 @@ class Exercise {
     required this.muscleGroups,
     required this.aliases,
     this.defaultLoadFactor = 1,
+    this.bodyweight = false,
   });
 
   final int id;
@@ -15,6 +16,9 @@ class Exercise {
   final List<String> aliases;
   final double defaultLoadFactor;
 
+  /// A pull-up, dip, or push-up: a bare number is not added kilograms.
+  final bool bodyweight;
+
   Exercise copyWith({List<String>? aliases}) {
     return Exercise(
       id: id,
@@ -23,6 +27,7 @@ class Exercise {
       muscleGroups: muscleGroups,
       aliases: aliases ?? this.aliases,
       defaultLoadFactor: defaultLoadFactor,
+      bodyweight: bodyweight,
     );
   }
 }

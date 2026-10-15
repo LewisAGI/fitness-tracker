@@ -79,6 +79,7 @@ String normaliseTranscript(
   text = text.replaceAll(RegExp(r'[.!?]'), ' ; ');
   text = text.replaceAll('§', '.');
   text = _durationIdioms(text);
+  text = _stripPulse(text);
   text = _numberWords(text);
   text = _durationIdioms(text);
   text = text.replaceAllMapped(
@@ -301,6 +302,9 @@ _ReadInt _finishHundred(List<String> tokens, int start, int hundreds, String hun
   var value = hundreds;
   var consumed = 2;
   var suffix = hundredSuffix;
+  if (hundredSuffix.contains(',')) {
+    return _ReadInt(value, consumed, suffix);
+  }
   var cursor = start + 2;
   if (cursor < tokens.length) {
     final and = _splitWord(tokens[cursor]);
@@ -339,13 +343,121 @@ const _weightUnits = {
   'lbs',
 };
 
-/// A casual plate ("two twenty", "one oh two") is a weight only when it
-/// follows "at" or sits immediately before kg/kilos (optionally "point five").
+/// A casual plate ("two twenty", "one oh two") is a weight when it follows
+/// "at", sits immediately before kg/kilos, or follows a lift scheme
+/// ("5 by 5 one forty"). It is not a weight in "two twenty minutes"
+/// or "two twenty seconds".
 bool _weightContext(List<String> tokens, int start, int consumed) {
+  if (_timeUnitFollows(tokens, start + consumed)) {
+    return false;
+  }
   if (start > 0 && _splitWord(tokens[start - 1])?.word == 'at') {
     return true;
   }
+  if (_afterScheme(tokens, start)) {
+    return true;
+  }
   return _weightUnitFollows(tokens, start + consumed);
+}
+
+const _timeUnits = {
+  'sec',
+  'secs',
+  'second',
+  'seconds',
+  'min',
+  'mins',
+  'minute',
+  'minutes',
+  'rest',
+  'break',
+};
+
+bool _timeUnitFollows(List<String> tokens, int index) {
+  if (index >= tokens.length) {
+    return false;
+  }
+  if (index > 0 && tokens[index - 1].contains(',')) {
+    return false;
+  }
+  final word = _splitWord(tokens[index])?.word;
+  return word != null && _timeUnits.contains(word);
+}
+
+const _pulseNumber =
+    'zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|\\d+(?:\\.\\d+)?';
+
+/// "hr 150", "heart rate was one ten", and "150 bpm" are not load.
+String _stripPulse(String text) {
+  final number = '(?:$_pulseNumber)';
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:heart\\s+rate|hr)\\b[^,;]*?\\bbpm\\b',
+    ),
+    ' ',
+  );
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:heart\\s+rate|hr)\\b(?:\\s+(?:was|is|at|of|around|about|hit|reached))?(?:\\s+$number){1,4}\\b',
+    ),
+    ' ',
+  );
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:(?:one|two|three|four|five|six|seven|eight|nine)\\s+)?$number\\s+bpm\\b',
+    ),
+    ' ',
+  );
+  return text.replaceAll(RegExp(r'\s+'), ' ');
+}
+
+bool _afterScheme(List<String> tokens, int start) {
+  if (start == 0) {
+    return false;
+  }
+  final previous = _schemeToken(tokens[start - 1]);
+  if (previous == null) {
+    return false;
+  }
+  if (RegExp(r'^\d+x\d+$').hasMatch(previous)) {
+    return true;
+  }
+  if (!_isCountWord(previous)) {
+    return false;
+  }
+  var index = start - 2;
+  if (index >= 0) {
+    final mid = _schemeToken(tokens[index]);
+    if (mid == 'rep' || mid == 'reps') {
+      index--;
+    }
+  }
+  if (index < 0) {
+    return false;
+  }
+  final marker = _schemeToken(tokens[index]);
+  return marker == 'x' || marker == 'by' || marker == '×';
+}
+
+/// Letter words, a bare count (`5`), or a compact scheme (`5x5`).
+/// Digit tokens are not words, so the letter splitter misses them.
+String? _schemeToken(String raw) {
+  final split = _splitWord(raw);
+  if (split != null) {
+    return split.word;
+  }
+  final compact = RegExp(r'^(\d+x\d+)$').firstMatch(raw);
+  if (compact != null) {
+    return compact.group(1);
+  }
+  return RegExp(r'^(\d+)$').firstMatch(raw)?.group(1);
+}
+
+bool _isCountWord(String word) {
+  if (RegExp(r'^\d+$').hasMatch(word)) {
+    return true;
+  }
+  return _ones.containsKey(word) || _tens.containsKey(word);
 }
 
 bool _weightUnitFollows(List<String> tokens, int index) {
@@ -400,14 +512,18 @@ _ReadInt? _plateShape(List<String> tokens, int start) {
       return _ReadInt(lead * 100 + _ones[last.word]!, 3, last.suffix);
     }
   }
-  final rest = _readUnderHundred(tokens, start + 1);
+  final rest = _readUnderHundred(tokens, start + 1, peelDuration: true);
   if (rest != null && rest.value >= 10 && rest.value < 100) {
     return _ReadInt(lead * 100 + rest.value, 1 + rest.consumed, rest.suffix);
   }
   return null;
 }
 
-_ReadInt? _readUnderHundred(List<String> tokens, int start) {
+_ReadInt? _readUnderHundred(
+  List<String> tokens,
+  int start, {
+  bool peelDuration = false,
+}) {
   if (start >= tokens.length) {
     return null;
   }
@@ -427,11 +543,15 @@ _ReadInt? _readUnderHundred(List<String> tokens, int start) {
   if (_tens.containsKey(first.word) && start + 1 < tokens.length) {
     final next = _splitWord(tokens[start + 1]);
     if (next != null && _ones.containsKey(next.word) && _ones[next.word]! < 10) {
-      return _ReadInt(
-        _tens[first.word]! + _ones[next.word]!,
-        2,
-        next.suffix,
-      );
+      final durationOwnsOnes =
+          peelDuration && _timeUnitFollows(tokens, start + 2);
+      if (!durationOwnsOnes) {
+        return _ReadInt(
+          _tens[first.word]! + _ones[next.word]!,
+          2,
+          next.suffix,
+        );
+      }
     }
   }
   if (_ones.containsKey(first.word)) {
