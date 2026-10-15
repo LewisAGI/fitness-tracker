@@ -13,6 +13,10 @@ void main() {
     expect(VoiceEndWord.endsLog('abandoned the set'), isFalse);
     expect(VoiceEndWord.endsLog("I'm not done"), isFalse);
     expect(VoiceEndWord.endsLog('well done'), isFalse);
+    expect(VoiceEndWord.endsLog('never done'), isFalse);
+    expect(VoiceEndWord.endsLog('almost done'), isFalse);
+    expect(VoiceEndWord.endsLog('all done'), isFalse);
+    expect(VoiceEndWord.endsLog('not  done'), isFalse);
     expect(VoiceEndWord.strip("bench press I'm done").toLowerCase(), 'bench press');
     expect(VoiceEndWord.strip('squats done.').toLowerCase(), 'squats');
   });
@@ -60,6 +64,10 @@ void main() {
     );
     flow.onSpeech("I'm not done", isFinal: true);
     flow.onSpeech('well done', isFinal: true);
+    flow.onSpeech('never done', isFinal: true);
+    flow.onSpeech('almost done', isFinal: true);
+    flow.onSpeech('all done', isFinal: true);
+    flow.onSpeech('not  done', isFinal: true);
     flow.onSpeech('done', isFinal: false);
     flow.onSpeech('done three sets of bench', isFinal: true);
     expect(stops, 0);

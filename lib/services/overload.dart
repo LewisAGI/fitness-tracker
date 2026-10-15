@@ -99,23 +99,30 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   final warned = lift.muscleGroups.any(
     (muscle) => context.warnedMuscles.contains(muscle.toLowerCase()),
   );
-  final aim = working.any((set) => set.reps < target.low)
-      ? target.low
-      : target.high;
+  final missed = working.any((set) => set.reps < target.low);
+  final aim = missed ? target.low : target.high;
+  final flagged = lowReady || warned;
   final failedEarly = working.any(
     (set) => set.rir == 0 && set.reps < target.low,
   );
+  // RIR above 5 is rejected input and must not step the weight up.
   final rirStep = working.every(
-    (set) => set.rir != null && set.rir! >= 2 && set.reps >= target.low,
+    (set) =>
+        set.rir != null &&
+        set.rir! >= 2 &&
+        set.rir! <= 5 &&
+        set.reps >= target.low,
   );
 
   late final OverloadAction action;
   late double nextWeight;
   int? aimReps;
-  if (lowReady && warned) {
+  // A flag outranks a step-up. Deload only when reps were missed as well.
+  // Low readiness and a strain warning together still hold when the reps were hit.
+  if (missed && flagged) {
     action = OverloadAction.deload;
     nextWeight = workingWeight * 0.9;
-  } else if (lowReady || warned || failedEarly) {
+  } else if (failedEarly || flagged) {
     action = OverloadAction.hold;
     nextWeight = workingWeight;
   } else if (hitTop || rirStep) {
@@ -158,7 +165,15 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   return (low: 8, high: 12);
 }
 
-double _roundPlate(double value) => (value / 2.5).round() * 2.5;
+/// Nearest 2.5 kg, applied to the final suggestion. An exact halfway step rounds down.
+double _roundPlate(double value) {
+  final milli = (value * 1000).round();
+  const step = 2500;
+  final base = milli ~/ step;
+  final remainder = milli - base * step;
+  final picked = remainder > 1250 ? base + 1 : base;
+  return picked * 2.5;
+}
 
 String shortLift(String name) {
   const known = {

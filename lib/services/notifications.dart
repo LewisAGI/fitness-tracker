@@ -53,17 +53,21 @@ class LocalNotifications implements NotificationPort {
   }
 
   @override
-  Future<void> requestPermissions() async {
-    await _plugin
+  Future<bool> requestPermissions() async {
+    final android = await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.requestNotificationsPermission();
-    await _plugin
+    final ios = await _plugin
         .resolvePlatformSpecificImplementation<
           IOSFlutterLocalNotificationsPlugin
         >()
         ?.requestPermissions(alert: true, badge: false, sound: true);
+    if (android == false || ios == false) {
+      return false;
+    }
+    return true;
   }
 
   @override

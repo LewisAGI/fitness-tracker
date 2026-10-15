@@ -20,8 +20,9 @@ class RecordingNotifications implements NotificationPort {
   }
 
   @override
-  Future<void> requestPermissions() async {
+  Future<bool> requestPermissions() async {
     calls.add('permissions');
+    return true;
   }
 
   @override

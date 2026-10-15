@@ -24,8 +24,9 @@ class RecordingNotifications implements NotificationPort {
   }
 
   @override
-  Future<void> requestPermissions() async {
+  Future<bool> requestPermissions() async {
     calls.add('permissions');
+    return true;
   }
 
   @override
@@ -197,6 +198,60 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets('a denied notification permission leaves the toggle off', (tester) async {
+    final store = await _ready(tester);
+    final port = _DenyingNotifications();
+    await _pump(tester, store, port);
+
+    await tester.tap(find.byKey(const ValueKey('tab-Settings')));
+    await _settle(tester);
+    await tester.tap(find.byKey(const ValueKey('Morning-switch')));
+    await _settle(tester);
+    expect(store.schedule.morningEnabled, isFalse);
+
+    port.calls.clear();
+    await tester.tap(find.byKey(const ValueKey('Morning-switch')));
+    await _settle(tester);
+    expect(store.schedule.morningEnabled, isFalse);
+    expect(port.calls, ['permissions']);
+    expect(find.byIcon(Icons.notifications_off), findsOneWidget);
+    expect(find.byTooltip('Notifications'), findsOneWidget);
+  });
+
+  testWidgets('confirm card flags a rejected RIR and a converted weight', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+    final parser = VoiceParser.seeded();
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('bench 3x8 at 100 pounds not to failure'),
+      autoSave: false,
+    );
+    expect(find.byIcon(Icons.flag), findsOneWidget);
+    expect(find.byIcon(Icons.swap_horiz), findsOneWidget);
+    expect(find.byTooltip('kg'), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('muay thai sparring'),
+      autoSave: false,
+    );
+    expect(find.text('?'), findsWidgets);
+    expect(find.textContaining('0 min'), findsNothing);
+  });
+}
+
+class _DenyingNotifications extends RecordingNotifications {
+  @override
+  Future<bool> requestPermissions() async {
+    calls.add('permissions');
+    return false;
+  }
 }
 
 Future<Store> _ready(WidgetTester tester) async {

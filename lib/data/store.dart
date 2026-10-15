@@ -278,16 +278,28 @@ class Store extends ChangeNotifier {
     ParsedSession session,
   ) async {
     for (final set in session.sets) {
-      await txn.insert('sets', {
-        'session_id': id,
-        'exercise_id': set.exerciseId,
-        'set_count': set.sets,
-        'reps': set.reps,
-        'weight_kg': set.weightKg,
-        'bodyweight': set.bodyweight ? 1 : 0,
-        'rpe': session.rpe,
-        'rir': set.rir,
-      });
+      final count = set.sets;
+      if (set.rirLastOnly && count != null && count > 1) {
+        for (var i = 0; i < count; i++) {
+          await _insertSet(
+            txn,
+            sessionId: id,
+            set: set,
+            setCount: 1,
+            rpe: session.rpe,
+            rir: i == count - 1 ? set.rir : null,
+          );
+        }
+      } else {
+        await _insertSet(
+          txn,
+          sessionId: id,
+          set: set,
+          setCount: set.sets,
+          rpe: session.rpe,
+          rir: set.rir,
+        );
+      }
       if (set.exerciseId != null) {
         await _putSetting('last_exercise_id', '${set.exerciseId}', txn);
       }
@@ -584,67 +596,157 @@ class Store extends ChangeNotifier {
   }
 
   Future<void> importSummary(String raw) async {
-    final decoded = jsonDecode(raw);
-    if (decoded is! Map) {
-      return;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      throw const FormatException('import');
+    }
+    if (decoded is! Map || decoded['schema'] != 'fitness-summary-v1') {
+      throw const FormatException('import');
+    }
+    final sessions = decoded['sessions'];
+    final checkins = decoded['checkins'];
+    final plan = decoded['plan'];
+    if (sessions is! List || checkins is! List || plan is! List) {
+      throw const FormatException('import');
+    }
+    for (final item in sessions) {
+      if (item is! Map || item['date'] is! String || item['type'] is! String) {
+        throw const FormatException('import');
+      }
+      if (item['sets'] is! List || item['blocks'] is! List) {
+        throw const FormatException('import');
+      }
+    }
+    for (final item in checkins) {
+      if (item is! Map || item['date'] is! String || item['slot'] is! String) {
+        throw const FormatException('import');
+      }
+    }
+    for (final item in plan) {
+      if (item is! Map || item['date'] is! String || item['type'] is! String) {
+        throw const FormatException('import');
+      }
     }
     await db.transaction((txn) async {
-      final sessions = decoded['sessions'];
-      if (sessions is! List) {
-        return;
-      }
       for (final item in sessions) {
-        if (item is! Map) {
+        final existing = await txn.query(
+          'sessions',
+          where:
+              "date = ? AND ifnull(start_time, '') = ? AND type = ? AND ifnull(raw_transcript, '') = ?",
+          whereArgs: [
+            item['date'],
+            item['start_time'] ?? '',
+            item['type'],
+            item['raw_transcript'] ?? '',
+          ],
+        );
+        if (existing.isNotEmpty) {
           continue;
         }
         final id = await txn.insert('sessions', {
           'date': item['date'],
           'start_time': item['start_time'],
-          'type': item['type'] ?? 'other',
+          'type': item['type'],
           'duration_min': item['duration_min'],
           'rpe': item['rpe'],
           'notes': item['notes'],
           'raw_transcript': item['raw_transcript'],
         });
-        final sets = item['sets'];
-        if (sets is List) {
-          for (final set in sets) {
-            if (set is! Map) {
-              continue;
-            }
-            await txn.insert('sets', {
-              'session_id': id,
-              'exercise_id': set['exercise_id'],
-              'set_count': set['set_count'],
-              'reps': set['reps'],
-              'weight_kg': set['weight_kg'],
-              'distance_km': set['distance_km'],
-              'duration_s': set['duration_s'],
-              'rpe': set['rpe'],
-              'bodyweight': set['bodyweight'] == true ? 1 : 0,
-              'rir': set['rir'],
-            });
+        for (final set in item['sets'] as List) {
+          if (set is! Map) {
+            throw const FormatException('import');
           }
+          await txn.insert('sets', {
+            'session_id': id,
+            'exercise_id': set['exercise_id'],
+            'set_count': set['set_count'],
+            'reps': set['reps'],
+            'weight_kg': set['weight_kg'],
+            'distance_km': set['distance_km'],
+            'duration_s': set['duration_s'],
+            'rpe': set['rpe'],
+            'bodyweight': set['bodyweight'] == true ? 1 : 0,
+            'rir': set['rir'],
+          });
         }
-        final blocks = item['blocks'];
-        if (blocks is List) {
-          for (final block in blocks) {
-            if (block is! Map) {
-              continue;
-            }
-            await txn.insert('session_blocks', {
-              'session_id': id,
-              'subtype': block['subtype'],
-              'duration_min': block['duration_min'],
-              'rpe': block['rpe'] ?? 0,
-              'load': block['load'] ?? 0,
-              'label': block['label'],
-            });
+        for (final block in item['blocks'] as List) {
+          if (block is! Map) {
+            throw const FormatException('import');
           }
+          await txn.insert('session_blocks', {
+            'session_id': id,
+            'subtype': block['subtype'],
+            'duration_min': block['duration_min'],
+            'rpe': block['rpe'] ?? 0,
+            'load': block['load'] ?? 0,
+            'label': block['label'],
+          });
         }
+      }
+      for (final item in checkins) {
+        await txn.insert('checkins', {
+          'date': item['date'],
+          'slot': item['slot'],
+          'soreness': item['soreness'],
+          'energy': item['energy'],
+          'sleep_quality': item['sleep_quality'],
+          'sleep_hours': item['sleep_hours'],
+          'mood': item['mood'],
+          'stress': item['stress'],
+          'session_feel': item['session_feel'],
+          'ate_well': item['ate_well'],
+          'raw_transcript': item['raw_transcript'],
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final item in plan) {
+        final muscles = _musclesJson(item['muscle_groups']);
+        final existing = await txn.query(
+          'plan_items',
+          where:
+              "date = ? AND type = ? AND muscle_groups = ? AND ifnull(intensity, '') = ?",
+          whereArgs: [
+            item['date'],
+            item['type'],
+            muscles,
+            item['intensity'] ?? '',
+          ],
+        );
+        if (existing.isNotEmpty) {
+          continue;
+        }
+        await txn.insert('plan_items', {
+          'date': item['date'],
+          'type': item['type'],
+          'muscle_groups': muscles,
+          'intensity': item['intensity'],
+          'duration_min_est': item['duration_min_est'],
+          'suggestion': item['suggestion'],
+        });
       }
     });
     notifyListeners();
+  }
+
+  Future<void> _insertSet(
+    DatabaseExecutor txn, {
+    required int sessionId,
+    required ParsedSet set,
+    required int? setCount,
+    required int? rpe,
+    required int? rir,
+  }) async {
+    await txn.insert('sets', {
+      'session_id': sessionId,
+      'exercise_id': set.exerciseId,
+      'set_count': setCount,
+      'reps': set.reps,
+      'weight_kg': set.weightKg,
+      'bodyweight': set.bodyweight ? 1 : 0,
+      'rpe': rpe,
+      'rir': rir,
+    });
   }
 
   Exercise? exerciseByName(String name) {
@@ -1121,6 +1223,16 @@ double planLoadOf(PlanItem plan) {
     intensity: plan.intensity,
   );
   return (minutes * rpe).toDouble();
+}
+
+String _musclesJson(Object? value) {
+  if (value is String) {
+    return value;
+  }
+  if (value is List) {
+    return jsonEncode(value);
+  }
+  return '[]';
 }
 
 String sessionLine(Session session) {

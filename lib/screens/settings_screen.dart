@@ -26,6 +26,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  var _notificationsDenied = false;
+
   @override
   void initState() {
     super.initState();
@@ -50,7 +52,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         (!current.morningEnabled && next.morningEnabled) ||
         (!current.eveningEnabled && next.eveningEnabled);
     if (enabling) {
-      await widget.scheduler.requestPermissions();
+      final allowed = await widget.scheduler.requestPermissions();
+      if (!allowed) {
+        if (!mounted) {
+          return;
+        }
+        setState(() => _notificationsDenied = true);
+        return;
+      }
+    }
+    if (_notificationsDenied && mounted) {
+      setState(() => _notificationsDenied = false);
     }
     await widget.store.setSchedule(next);
     await widget.scheduler.reschedule(next);
@@ -104,7 +116,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     final text = await File(path).readAsString();
-    await widget.store.importSummary(text);
+    try {
+      await widget.store.importSummary(text);
+    } on FormatException {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Icon(Icons.error_outline, color: AppColors.accent),
+        ),
+      );
+    }
   }
 
   @override
@@ -133,6 +156,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: ListView(
         children: [
+          if (_notificationsDenied)
+            const ListTile(
+              leading: Tooltip(
+                message: 'Notifications',
+                child: Icon(Icons.notifications_off, color: AppColors.accent),
+              ),
+            ),
           _row(
             icon: Icons.wb_sunny_outlined,
             message: 'Morning',

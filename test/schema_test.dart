@@ -85,6 +85,25 @@ void main() {
       whereArgs: ['round_minutes'],
     );
     expect(setting.single['value'], '3');
+
+    await upgradeFitnessDatabase(upgraded, 1, 2);
+    final rirColumns = await upgraded.rawQuery('PRAGMA table_info(sets)');
+    expect(rirColumns.where((column) => column['name'] == 'rir'), hasLength(1));
+    expect(await upgraded.query('session_blocks'), hasLength(2));
     await upgraded.close();
+  });
+
+  test('a newer file is not downgraded', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    final directory = await Directory.systemTemp.createTemp('fitness-downgrade');
+    final path = '${directory.path}/newer.db';
+    final newer = await openDatabase(
+      path,
+      version: 3,
+      onCreate: (db, version) async {},
+    );
+    await newer.close();
+    expect(openFitnessDatabase(path: path), throwsA(isA<StateError>()));
   });
 }

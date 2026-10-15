@@ -96,16 +96,31 @@ String normaliseTranscript(String input) {
 }
 
 String _corrections(String text) {
-  final phrase = RegExp(
-    r'\b\S+\s+(?:no\s+wait|sorry|i\s+mean|actually)\s+',
+  final marker = RegExp(r'\b(?:no\s+wait|sorry|i\s+mean|actually)\s+');
+  final name = RegExp(
+    r'(?:\b(?!and\b|then\b|of\b|at\b|for\b|the\b|a\b)[a-z][a-z-]*\b\s+)*\b(?!and\b|then\b|of\b|at\b|for\b|the\b|a\b)[a-z][a-z-]*\b\s*$',
+  );
+  final scheme = RegExp(
+    r'(?:\b(?:\d+x\d+|\d+(?:\.\d+)?|sets?|reps?|of|at|x|by|for|kg|k)\b\s*)+$',
   );
   var current = text;
   while (true) {
-    final next = current.replaceFirst(phrase, '');
-    if (next == current) {
+    final match = marker.firstMatch(current);
+    if (match == null) {
       return current;
     }
-    current = next;
+    final rest = current.substring(match.end);
+    final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
+    var before = current.substring(0, match.start);
+    if (RegExp(r'^[a-z]').hasMatch(token)) {
+      final tail = scheme.firstMatch(before);
+      final head = tail == null ? before : before.substring(0, tail.start);
+      final kept = tail == null ? '' : before.substring(tail.start);
+      before = '${head.replaceFirst(name, '').trim()} ${kept.trim()}'.trim();
+    } else {
+      before = before.replaceFirst(RegExp(r'\S+\s*$'), '');
+    }
+    current = '${before.trim()} ${rest.trim()}'.trim();
   }
 }
 

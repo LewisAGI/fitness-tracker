@@ -162,6 +162,11 @@ Future<Database> openFitnessDatabase({String? path}) async {
       await db.insert('settings', {'key': 'round_minutes', 'value': '3'});
     },
     onUpgrade: upgradeFitnessDatabase,
+    onDowngrade: (db, oldVersion, newVersion) {
+      throw StateError(
+        'Cannot open a v$oldVersion database as v$newVersion.',
+      );
+    },
   );
 }
 
@@ -171,25 +176,39 @@ Future<void> upgradeFitnessDatabase(
   int newVersion,
 ) async {
   if (oldVersion < 2) {
-    await db.execute('ALTER TABLE sets ADD COLUMN rir INTEGER');
-    await db.execute('''
-      CREATE TABLE session_blocks_v2 (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        subtype TEXT NOT NULL,
-        duration_min INTEGER,
-        rpe INTEGER NOT NULL,
-        load REAL NOT NULL,
-        label TEXT,
-        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute('''
-      INSERT INTO session_blocks_v2 (id, session_id, subtype, duration_min, rpe, load)
-      SELECT id, session_id, subtype, duration_min, rpe, load FROM session_blocks
-    ''');
-    await db.execute('DROP TABLE session_blocks');
-    await db.execute('ALTER TABLE session_blocks_v2 RENAME TO session_blocks');
+    final setColumns = await db.rawQuery('PRAGMA table_info(sets)');
+    final hasRir = setColumns.any((column) => column['name'] == 'rir');
+    if (!hasRir) {
+      await db.execute('ALTER TABLE sets ADD COLUMN rir INTEGER');
+    }
+    final blockColumns = await db.rawQuery('PRAGMA table_info(session_blocks)');
+    final hasLabel = blockColumns.any((column) => column['name'] == 'label');
+    final duration = blockColumns.where(
+      (column) => column['name'] == 'duration_min',
+    );
+    final nullable = duration.isNotEmpty && duration.first['notnull'] == 0;
+    if (!(hasLabel && nullable)) {
+      await db.execute('''
+        CREATE TABLE session_blocks_v2 (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          subtype TEXT NOT NULL,
+          duration_min INTEGER,
+          rpe INTEGER NOT NULL,
+          load REAL NOT NULL,
+          label TEXT,
+          FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO session_blocks_v2 (id, session_id, subtype, duration_min, rpe, load)
+        SELECT id, session_id, subtype, duration_min, rpe, load FROM session_blocks
+      ''');
+      await db.execute('DROP TABLE session_blocks');
+      await db.execute(
+        'ALTER TABLE session_blocks_v2 RENAME TO session_blocks',
+      );
+    }
     await db.insert('settings', {
       'key': 'round_minutes',
       'value': '3',

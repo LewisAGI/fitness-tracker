@@ -76,6 +76,18 @@ class _ConfirmCardState extends State<ConfirmCard> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (widget.result.imperial)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Tooltip(
+                  message: 'kg',
+                  child: Icon(
+                    Icons.swap_horiz,
+                    color: AppColors.accent,
+                    size: 18,
+                  ),
+                ),
+              ),
             for (final session in widget.result.sessions) ...[
               Text(
                 session.summary,
@@ -198,9 +210,17 @@ class _ConfirmCardState extends State<ConfirmCard> {
               if (value == null) {
                 return;
               }
-              setState(() => set.rir = value.rir);
+              setState(() {
+                set.rir = value.rir;
+                set.rirFlagged = false;
+              });
             },
           ),
+          if (set.rirFlagged)
+            const Tooltip(
+              message: 'RIR',
+              child: Icon(Icons.flag, color: AppColors.accent, size: 18),
+            ),
         ],
       ),
     );

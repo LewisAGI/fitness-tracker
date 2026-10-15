@@ -65,6 +65,8 @@ class ParsedSet {
     this.muscleGroups = const [],
     this.category,
     this.rir,
+    this.rirLastOnly = false,
+    this.rirFlagged = false,
   });
 
   int? exerciseId;
@@ -78,6 +80,8 @@ class ParsedSet {
   List<String> muscleGroups;
   String? category;
   int? rir;
+  bool rirLastOnly;
+  bool rirFlagged;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -214,11 +218,13 @@ class ParseResult {
     required this.normalised,
     required this.sessions,
     required this.plans,
+    this.imperial = false,
   });
 
   final String normalised;
   final List<ParsedSession> sessions;
   final List<ParsedPlan> plans;
+  final bool imperial;
 
   int get entryCount => sessions.fold<int>(
     0,
@@ -235,12 +241,17 @@ class VoiceParser {
   factory VoiceParser.seeded() => VoiceParser(seedExercises());
 
   ParseResult parse(String input, {Exercise? lastExercise}) {
+    final imperial = RegExp(
+      r'\b(?:lbs?|pounds?|miles?|mi)\b',
+      caseSensitive: false,
+    ).hasMatch(input);
     final normalised = normaliseTranscript(input);
     if (_hasWeekday(normalised)) {
       return ParseResult(
         normalised: normalised,
         sessions: const [],
         plans: _parsePlans(normalised),
+        imperial: imperial,
       );
     }
     final parts = _splitEntries(normalised);
@@ -268,21 +279,30 @@ class VoiceParser {
       normalised: normalised,
       sessions: _mergeGym(parsed),
       plans: const [],
+      imperial: imperial,
     );
   }
 
   ParsedSession _parseEntry(String text, Exercise? lastExercise) {
     final blocks = _parseBlocks(text);
-    if (blocks.isNotEmpty || _mentionsThai(text)) {
+    final product = _roundProduct(text);
+    if (blocks.isNotEmpty || _mentionsThai(text) || product != null) {
       final stated = _durationMinutes(text);
-      _balanceBlocks(blocks, stated);
+      if (product == null) {
+        _balanceBlocks(blocks, stated);
+      }
       final thai =
-          _mentionsThai(text) || blocks.any((block) => block.subtype != 'other');
+          _mentionsThai(text) ||
+          product != null ||
+          blocks.any((block) => block.subtype != 'other');
       final explicit = _explicitRpe(text);
       final weighted = blocks.isEmpty ? null : _weightedRpe(blocks);
+      final minutes = blocks.isEmpty
+          ? (product ?? stated)
+          : _sessionMinutes(blocks, stated);
       return ParsedSession(
         type: thai ? 'muay_thai' : 'other',
-        durationMin: _sessionMinutes(blocks, stated),
+        durationMin: minutes,
         rpe: explicit ?? weighted ?? _bareIntensity(text),
         blocks: blocks,
         raw: text,
@@ -360,6 +380,7 @@ class VoiceParser {
       unmatched = true;
     }
 
+    final heard = liftRir(text);
     return ParsedSession(
       type: 'gym',
       raw: text,
@@ -375,7 +396,9 @@ class VoiceParser {
           unmatched: unmatched,
           muscleGroups: exercise?.muscleGroups ?? const [],
           category: exercise?.category,
-          rir: liftRir(text),
+          rir: heard.value,
+          rirLastOnly: heard.lastOnly,
+          rirFlagged: heard.flagged,
         ),
       ],
     );
@@ -438,6 +461,33 @@ class VoiceParser {
       }
       take(match);
       addSubs(subs, _unitMinutes(match.group(1)!, match.group(2)!));
+    }
+
+    final timedRoundsRe = RegExp(
+      '\\b(?:($subtypeAlt)\\s+)?(\\d+)\\s+rounds?\\s+of\\s+(\\d+(?:\\.\\d+)?)\\s*($unit)\\b(?:\\s+($subtypeAlt))?',
+    );
+    for (final match in timedRoundsRe.allMatches(text)) {
+      if (!free(match)) {
+        continue;
+      }
+      final name = match.group(1) ?? match.group(5);
+      take(match);
+      if (name == null) {
+        continue;
+      }
+      final subtype = _subtypeCanonical[name];
+      if (subtype == null) {
+        continue;
+      }
+      final count = int.parse(match.group(2)!);
+      final minutes = count * _unitMinutes(match.group(3)!, match.group(4)!);
+      blocks.add(
+        ParsedBlock(
+          subtype: subtype,
+          durationMin: minutes,
+          rpe: sessionTone ?? thaiBlockRpe[subtype] ?? 6,
+        ),
+      );
     }
 
     final roundsRe = RegExp(
@@ -933,15 +983,31 @@ void _balanceBlocks(List<ParsedBlock> blocks, int? stated) {
     for (final block in blocks)
       if (block.durationMin == null) block,
   ];
-  if (missing.isEmpty || stated == null) {
+  if (missing.isEmpty || stated == null || stated <= 0) {
     return;
   }
   final known = blocks.fold<int>(0, (sum, block) => sum + (block.durationMin ?? 0));
   final pool = stated - known;
-  final shares = splitMinutes(pool < 0 ? 0 : pool, missing.length);
-  for (var i = 0; i < missing.length; i++) {
-    missing[i].durationMin = shares[i];
+  if (pool <= 0) {
+    return;
   }
+  final shares = splitMinutes(pool, missing.length);
+  for (var i = 0; i < missing.length; i++) {
+    if (shares[i] > 0) {
+      missing[i].durationMin = shares[i];
+    }
+  }
+}
+
+int? _roundProduct(String text) {
+  final match = RegExp(
+    r'\b(\d+)\s+rounds?\s+of\s+(\d+(?:\.\d+)?)\s*(hours|hour|hrs|hr|minutes|mins|min)\b',
+  ).firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  return int.parse(match.group(1)!) *
+      _unitMinutes(match.group(2)!, match.group(3)!);
 }
 
 int? _sessionMinutes(List<ParsedBlock> blocks, int? stated) {
@@ -1202,32 +1268,86 @@ String _titleWord(String word) {
   return '${word[0].toUpperCase()}${word.substring(1)}';
 }
 
-int? liftRir(String text) {
-  final explicit = RegExp(r'\brir\s+(\d+)\b').firstMatch(text);
+class LiftRir {
+  const LiftRir({this.value, this.flagged = false, this.lastOnly = false});
+
+  final int? value;
+  final bool flagged;
+  final bool lastOnly;
+}
+
+/// Reps in reserve for one lift line.
+///
+/// Decimals round half away from zero (`1.5` → `2`; RPE `8.5` is `10 - 8.5` = `1.5` → `2`).
+/// RIR outside 0–5, and RPE outside 5–10, come back null and flagged so they cannot step a
+/// weight up. A negation within the three words before a phrase (`not to failure`,
+/// `nowhere near failure`, `not easy`) is also null and flagged. Failure phrases apply to
+/// the last set only.
+LiftRir liftRir(String text) {
+  final explicit = RegExp(r'\brir\s+(\d+(?:\.\d+)?)\b').firstMatch(text);
   if (explicit != null) {
-    return int.parse(explicit.group(1)!);
+    if (_rirNegated(text, explicit.start)) {
+      return const LiftRir(flagged: true);
+    }
+    return _acceptRir(double.parse(explicit.group(1)!));
   }
-  final rpe = RegExp(r'\brpe\s+(\d+)\b').firstMatch(text);
+  final rpe = RegExp(r'\brpe\s+(\d+(?:\.\d+)?)\b').firstMatch(text);
   if (rpe != null) {
-    final value = int.parse(rpe.group(1)!);
-    final rir = 10 - value;
-    return rir < 0 ? 0 : rir;
+    if (_rirNegated(text, rpe.start)) {
+      return const LiftRir(flagged: true);
+    }
+    final value = double.parse(rpe.group(1)!);
+    if (value < 5 || value > 10) {
+      return const LiftRir(flagged: true);
+    }
+    return _acceptRir(10 - value);
   }
-  if (RegExp(
-    r'\b(?:near\s+failure|nearly\s+failed|one\s+left|1\s+left)\b',
-  ).hasMatch(text)) {
-    return 1;
+  final phrases = <(RegExp, int, bool)>[
+    (
+      RegExp(r'\b(?:near\s+failure|nearly\s+failed|one\s+left|1\s+left)\b'),
+      1,
+      false,
+    ),
+    (RegExp(r'\b(?:to\s+failure|failed)\b'), 0, true),
+    (RegExp(r'\b(?:two\s+left|2\s+left)\b'), 2, false),
+    (RegExp(r'\b(?:easy|comfortable)\b'), 3, false),
+  ];
+  for (final phrase in phrases) {
+    final match = phrase.$1.firstMatch(text);
+    if (match == null) {
+      continue;
+    }
+    if (_rirNegated(text, match.start)) {
+      return const LiftRir(flagged: true);
+    }
+    return LiftRir(value: phrase.$2, lastOnly: phrase.$3);
   }
-  if (RegExp(r'\b(?:to\s+failure|failed)\b').hasMatch(text)) {
-    return 0;
+  return const LiftRir();
+}
+
+LiftRir _acceptRir(double raw) {
+  final rounded = raw.round();
+  if (rounded < 0 || rounded > 5) {
+    return const LiftRir(flagged: true);
   }
-  if (RegExp(r'\b(?:two\s+left|2\s+left)\b').hasMatch(text)) {
-    return 2;
+  return LiftRir(value: rounded);
+}
+
+bool _rirNegated(String text, int index) {
+  final prior = text.substring(0, index).trim();
+  if (prior.isEmpty) {
+    return false;
   }
-  if (RegExp(r'\b(?:easy|comfortable)\b').hasMatch(text)) {
-    return 3;
+  final words = prior.split(RegExp(r'\s+'));
+  final start = words.length > 3 ? words.length - 3 : 0;
+  const negations = {'not', 'nowhere', 'never', 'no', "isn't", 'isnt', "don't", 'dont'};
+  for (var i = start; i < words.length; i++) {
+    final word = words[i].replaceAll(RegExp(r"[^a-z']"), '');
+    if (negations.contains(word)) {
+      return true;
+    }
   }
-  return null;
+  return false;
 }
 
 ParseResult sessionToParseResult(Session session) {

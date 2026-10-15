@@ -218,7 +218,7 @@ String _markdown(
         session.blocks
             .map(
               (block) =>
-                  '${block.label ?? block.subtype} ${block.durationMin ?? '?'} min RPE ${block.rpe} load ${block.load.round()}',
+                  '${block.label ?? block.subtype} ${block.durationMin == null ? '?' : '${block.durationMin} min'} RPE ${block.rpe} load ${block.durationMin == null ? '?' : block.load.round()}',
             )
             .join('; '),
     ].join(' ');
