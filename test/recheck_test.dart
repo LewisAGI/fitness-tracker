@@ -127,6 +127,60 @@ void main() {
     expect(swappedScheme.exerciseName, 'Back squat');
     expect(swappedScheme.sets, 5);
     expect(swappedScheme.reps, 3);
+
+    final kept = setOf('squat 5x5 at 100 kg I mean squat 5x3');
+    expect(kept.exerciseName, 'Back squat');
+    expect(kept.sets, 5);
+    expect(kept.reps, 3);
+    expect(kept.weightKg, 100);
+
+    final byScheme = setOf('bench 3x8 at 60 kg I mean 3 by 10');
+    expect(byScheme.exerciseName, 'Bench press');
+    expect(byScheme.sets, 3);
+    expect(byScheme.reps, 10);
+    expect(byScheme.weightKg, 60);
+  });
+
+  test('casual numbers outside a weight are not plate weights', () {
+    final ran = parser.parse('ran for two twenty minutes').sessions.single;
+    expect(ran.type, 'run');
+    expect(ran.durationMin, isNull);
+    expect(ran.summary, 'Run · ?');
+
+    final hike = parser.parse('hike two thirty minutes').sessions.single;
+    expect(hike.type, 'hike');
+    expect(hike.durationMin, isNull);
+    expect(hike.summary, 'Hike · ?');
+
+    final thai = parser.parse('muay thai one twenty minutes').sessions.single;
+    expect(thai.type, 'muay_thai');
+    expect(thai.durationMin, isNot(120));
+    expect(thai.durationMin, isNull);
+    expect(thai.summary, contains('?'));
+
+    final far = parser.parse('ran three ten k').sessions.single;
+    expect(far.type, 'run');
+    expect(far.distanceKm, isNull);
+    expect(far.summary, 'Run · ?');
+
+    final bench = setOf('bench three sets of eight twelve');
+    expect(bench.exerciseName, 'Bench press');
+    expect(bench.sets, isNull);
+    expect(bench.reps, isNull);
+    expect(bench.summary, 'Bench press · ?');
+
+    final odd = setOf('3 sets of two twenty five at 60 kg');
+    expect(odd.reps, isNull);
+    expect(odd.weightKg, isNull);
+    expect(odd.summary, '?');
+  });
+
+  test('a comma splits an unknown entry into ?', () {
+    final sets = parser.parse('bench 3x8 at 60 kg, notanexercise').sessions.single.sets;
+    expect(sets.first.exerciseName, 'Bench press');
+    expect(sets.first.weightKg, 60);
+    expect(sets.last.unmatched, isTrue);
+    expect(sets.last.summary, '?');
   });
 
   test('6 rounds of 2 min is 12 minutes', () {

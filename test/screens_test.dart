@@ -262,9 +262,28 @@ void main() {
       tester,
       store,
       parser.parse('bench 3x8 at 15 kg'),
-      autoSave: false,
     );
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
     expect(find.byTooltip('Bar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(
+      tester,
+      store,
+      parser.parse('bench 3x8 at 100 pounds'),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
+    expect(find.byIcon(Icons.swap_horiz), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(tester, store, parser.parse('ran 3 miles'));
+    await tester.pump(const Duration(seconds: 3));
+    expect(find.byKey(const ValueKey('confirm-card')), findsOneWidget);
+    expect(find.byIcon(Icons.swap_horiz), findsOneWidget);
     await tester.tap(find.byTooltip('Discard'));
     await _settle(tester);
 
@@ -311,12 +330,28 @@ Future<Store> _ready(WidgetTester tester) async {
   return store!;
 }
 
+Store? _liveStore;
+
+/// Lets sqlite finish on real time, then pumps so the test returns with no
+/// lock timer still pending.
+Future<void> _quiet(WidgetTester tester, Store store) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+    await tester.pump();
+    if (!store.busy) {
+      return;
+    }
+  }
+  fail('Database work did not finish');
+}
+
 Future<void> _pump(WidgetTester tester, Store store, RecordingNotifications port) async {
+  _liveStore = store;
   await tester.binding.setSurfaceSize(const Size(390, 844));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   addTearDown(() async {
-    await tester.runAsync(() => store.settled);
-    await tester.pump();
+    await _quiet(tester, store);
   });
   await tester.pumpWidget(
     FitnessApp(
@@ -347,16 +382,25 @@ Future<void> _settle(WidgetTester tester, {bool Function()? ready}) async {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
   }
   await tester.pumpAndSettle();
+  final store = _liveStore;
+  if (store != null) {
+    await _quiet(tester, store);
+  }
 }
 
 /// Check-in save learns patterns on real sqlite time, then pops. A single
-/// short wait can return while that route still covers Today.
+/// short wait can return while that route still covers Today. The reloads
+/// finish on real time before the test returns.
 Future<void> _backOnToday(WidgetTester tester) async {
   final today = find.byKey(const ValueKey('evening-status'));
   for (var i = 0; i < 40; i++) {
     await tester.pump();
     if (today.evaluate().isNotEmpty) {
       await tester.pumpAndSettle();
+      final store = _liveStore;
+      if (store != null) {
+        await _quiet(tester, store);
+      }
       return;
     }
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));

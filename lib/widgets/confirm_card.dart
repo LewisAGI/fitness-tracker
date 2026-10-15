@@ -8,8 +8,11 @@ import '../services/voice_parser.dart';
 import '../theme/app_theme.dart';
 import 'icon_tip.dart';
 
-/// A flagged field, or a `?`, waits for a tap instead of the 3 second save.
+/// A flagged field, a converted unit, or a `?`, waits for a tap instead of the 3 second save.
 bool confirmNeedsReview(ParseResult result) {
+  if (result.imperial) {
+    return true;
+  }
   for (final session in result.sessions) {
     if (session.summary.contains('?')) {
       return true;

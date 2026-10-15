@@ -60,6 +60,24 @@ class Store extends ChangeNotifier {
   Future<void> _weekGate = Future<void>.value();
   var _inflight = 0;
   final List<Completer<void>> _idle = [];
+  Future<void> _serialTail = Future<void>.value();
+
+  bool get busy => _inflight > 0;
+
+  /// One screen reload talks to sqlite at a time, so a second load does not
+  /// sit on the lock with a pending timer.
+  Future<T> _serial<T>(Future<T> Function() body) {
+    final gate = _serialTail;
+    final done = Completer<void>();
+    _serialTail = done.future;
+    return gate.then((_) async {
+      try {
+        return await body();
+      } finally {
+        done.complete();
+      }
+    });
+  }
 
   /// Completes when screen reloads started by the last change have finished.
   /// Widget tests await this so a sqflite lock timer is not still pending.
@@ -173,7 +191,7 @@ class Store extends ChangeNotifier {
   }
 
   Future<DayBundle> loadDay(DateTime day) {
-    return _track(_readDay(day));
+    return _track(_serial(() => _readDay(day)));
   }
 
   Future<DayBundle> _readDay(DateTime day) async {
@@ -196,7 +214,7 @@ class Store extends ChangeNotifier {
   Future<WeekBundle> loadWeek(DateTime anchor) {
     // Plan reloads on every store change. Overlapping refreshes both insert
     // the same suggestion row and hit the unique key.
-    final run = _weekGate.then((_) => _loadWeek(anchor));
+    final run = _weekGate.then((_) => _serial(() => _loadWeek(anchor)));
     _weekGate = run.then((_) {}, onError: (Object _, StackTrace _) {});
     return _track(run);
   }
@@ -207,14 +225,14 @@ class Store extends ChangeNotifier {
     await refreshSuggestions(start.subtract(const Duration(days: 7)));
     final days = <DayBundle>[];
     for (var i = 0; i < 7; i++) {
-      days.add(await loadDay(start.add(Duration(days: i))));
+      days.add(await _readDay(start.add(Duration(days: i))));
     }
     final suggestions = await suggestionsForWeek(isoDate(start.subtract(const Duration(days: 7))));
     return WeekBundle(start: start, days: days, suggestions: suggestions);
   }
 
   Future<Set<String>> markedDays(DateTime month) {
-    return _track(_readMarkedDays(month));
+    return _track(_serial(() => _readMarkedDays(month)));
   }
 
   Future<Set<String>> _readMarkedDays(DateTime month) async {
@@ -454,7 +472,7 @@ class Store extends ChangeNotifier {
   }
 
   Future<List<StoredPattern>> patterns() {
-    return _track(_readPatterns());
+    return _track(_serial(() => _readPatterns()));
   }
 
   Future<List<StoredPattern>> _readPatterns() async {

@@ -69,6 +69,7 @@ class ParsedSet {
     this.rirFlagged = false,
     this.rirSetIndex,
     this.lightBar = false,
+    this.ambiguous = false,
   });
 
   int? exerciseId;
@@ -86,9 +87,13 @@ class ParsedSet {
   bool rirFlagged;
   int? rirSetIndex;
   bool lightBar;
+  bool ambiguous;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
+    if (ambiguous) {
+      return name == '?' ? '?' : '$name · ?';
+    }
     final setCount = sets;
     final repCount = reps;
     final load = bodyweight
@@ -156,6 +161,7 @@ class ParsedSession {
     List<ParsedSet>? sets,
     List<ParsedBlock>? blocks,
     this.raw = '',
+    this.ambiguous = false,
   }) : sets = sets ?? <ParsedSet>[],
        blocks = blocks ?? <ParsedBlock>[];
 
@@ -163,11 +169,15 @@ class ParsedSession {
   int? durationMin;
   int? rpe;
   double? distanceKm;
+  bool ambiguous;
   final List<ParsedSet> sets;
   final List<ParsedBlock> blocks;
   String raw;
 
   String get summary {
+    if (ambiguous && sets.isEmpty) {
+      return '${_typeLabel(type)} · ?';
+    }
     final bits = <String>[_typeLabel(type)];
     if (distanceKm != null) {
       bits.add('${fmtKm(distanceKm!)} km');
@@ -299,10 +309,18 @@ class VoiceParser {
   }
 
   ParsedSession _parseEntry(String text, Exercise? lastExercise) {
+    final durationAmbiguous = _ambiguousAmount(
+      text,
+      'minutes|mins|min|hours|hour|hrs|hr',
+    );
+    final distanceAmbiguous = _ambiguousAmount(text, 'km|k');
+    final ambiguous = durationAmbiguous || distanceAmbiguous;
+    final stated = durationAmbiguous ? null : _durationMinutes(text);
+    final distance = distanceAmbiguous ? null : _distanceKm(text);
     final blocks = _parseBlocks(text);
     final product = _roundProduct(text);
     if (blocks.isNotEmpty || _mentionsThai(text) || product != null) {
-      final stated = _durationMinutes(text);
+      final statedDuration = stated;
       if (product == null) {
         _balanceBlocks(blocks, stated);
       }
@@ -313,14 +331,15 @@ class VoiceParser {
       final explicit = _explicitRpe(text);
       final weighted = blocks.isEmpty ? null : _weightedRpe(blocks);
       final minutes = blocks.isEmpty
-          ? (product ?? stated)
-          : _sessionMinutes(blocks, stated);
+          ? (product ?? statedDuration)
+          : _sessionMinutes(blocks, statedDuration);
       return ParsedSession(
         type: thai ? 'muay_thai' : 'other',
         durationMin: minutes,
         rpe: explicit ?? weighted ?? _bareIntensity(text),
         blocks: blocks,
         raw: text,
+        ambiguous: ambiguous,
       );
     }
 
@@ -328,27 +347,30 @@ class VoiceParser {
     if (_isRun(text, match)) {
       return ParsedSession(
         type: 'run',
-        durationMin: _durationMinutes(text),
+        durationMin: stated,
         rpe: _explicitRpe(text) ?? _bareIntensity(text),
-        distanceKm: _distanceKm(text),
+        distanceKm: distance,
         raw: text,
+        ambiguous: ambiguous,
       );
     }
     if (_isHike(text, match)) {
       return ParsedSession(
         type: 'hike',
-        durationMin: _durationMinutes(text),
+        durationMin: stated,
         rpe: _explicitRpe(text) ?? _bareIntensity(text),
-        distanceKm: _distanceKm(text),
+        distanceKm: distance,
         raw: text,
+        ambiguous: ambiguous,
       );
     }
     if (_isYoga(text, match)) {
       return ParsedSession(
         type: 'yoga',
-        durationMin: _durationMinutes(text),
+        durationMin: stated,
         rpe: _explicitRpe(text) ?? _bareIntensity(text),
         raw: text,
+        ambiguous: ambiguous,
       );
     }
 
@@ -358,10 +380,11 @@ class VoiceParser {
         match.exercise.name != 'Hike') {
       return ParsedSession(
         type: 'other',
-        durationMin: _durationMinutes(text),
+        durationMin: stated,
         rpe: _explicitRpe(text) ?? _bareIntensity(text),
-        distanceKm: _distanceKm(text),
+        distanceKm: distance,
         raw: text,
+        ambiguous: ambiguous,
       );
     }
     if (match != null &&
@@ -374,13 +397,15 @@ class VoiceParser {
           : 'other';
       return ParsedSession(
         type: type,
-        durationMin: _durationMinutes(text),
+        durationMin: stated,
         rpe: _explicitRpe(text) ?? _bareIntensity(text),
         raw: text,
+        ambiguous: ambiguous,
       );
     }
 
     final slots = _strengthSlots(text);
+    final stray = _strayDigits(text);
     Exercise? exercise = match?.exercise;
     var unmatched = false;
     var spoken = match?.alias ?? _exerciseFragment(text);
@@ -408,22 +433,25 @@ class VoiceParser {
           exerciseId: exercise?.id,
           exerciseName: exercise?.name,
           spoken: spoken,
-          sets: slots.sets,
-          reps: slots.reps,
-          weightKg: slots.weightKg,
-          bodyweight: slots.bodyweight,
+          sets: stray ? null : slots.sets,
+          reps: stray ? null : slots.reps,
+          weightKg: stray ? null : slots.weightKg,
+          bodyweight: stray ? false : slots.bodyweight,
           unmatched: unmatched,
           muscleGroups: exercise?.muscleGroups ?? const [],
           category: exercise?.category,
-          rir: heard.value,
-          rirLastOnly: outOfRange ? false : heard.lastOnly,
-          rirFlagged: heard.flagged || outOfRange,
-          rirSetIndex: named,
-          lightBar: _lightBarbell(
-            exercise?.name,
-            slots.weightKg,
-            slots.bodyweight,
-          ),
+          rir: stray ? null : heard.value,
+          rirLastOnly: stray || outOfRange ? false : heard.lastOnly,
+          rirFlagged: stray ? false : heard.flagged || outOfRange,
+          rirSetIndex: stray ? null : named,
+          lightBar: stray
+              ? false
+              : _lightBarbell(
+                  exercise?.name,
+                  slots.weightKg,
+                  slots.bodyweight,
+                ),
+          ambiguous: stray,
         ),
       ],
     );
@@ -966,6 +994,36 @@ int _unitMinutes(String number, String unit) {
     return (value * 60).round();
   }
   return value.round();
+}
+
+bool _ambiguousAmount(String text, String units) {
+  return RegExp(
+    '\\b\\d+(?:\\.\\d+)?(?:\\s+\\d+(?:\\.\\d+)?)+\\s*(?:$units)\\b',
+  ).hasMatch(text);
+}
+
+/// A second number that the scheme and the weight did not use.
+bool _strayDigits(String text) {
+  var rest = text;
+  rest = rest.replaceAll(RegExp(r'\brpe\s+\d+(?:\.\d+)?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\brir\s+\d+(?:\.\d+)?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+(?:\.\d+)?\s+left\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\bon\s+(?:the\s+)?set\s+\d+\b'), ' ');
+  rest = rest.replaceAll(
+    RegExp(
+      r'\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+set\b',
+    ),
+    ' ',
+  );
+  rest = rest.replaceAll(RegExp(r'\b\d+\s*sets?\s+of\s+\d+\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s+reps?\s+\d+\s+sets?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\s+\d+\s+reps?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s+for\s+\d+\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\bat\s+\d+(?:\.\d+)?(?:\s*kg)?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+(?:\.\d+)?\s*kg\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+(?:\.\d+)?\s*k\b'), ' ');
+  return RegExp(r'\d').hasMatch(rest);
 }
 
 int? _durationMinutes(String text) {

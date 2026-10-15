@@ -123,9 +123,10 @@ String _corrections(String text, Iterable<String> exercises) {
     if (match == null) {
       return current;
     }
-    final rest = current.substring(match.end);
-    final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
+    var rest = current.substring(match.end);
     var before = current.substring(0, match.start);
+    rest = _composeWeightCorrection(before, rest);
+    final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
     final known = _knownExercise(rest, names);
     if (RegExp(r'^\d+\s*(?:x|by)\s*\d+\b|^\d+x\d+\b').hasMatch(rest)) {
       final weight = RegExp(
@@ -140,8 +141,20 @@ String _corrections(String text, Iterable<String> exercises) {
     } else if (known != null) {
       final after = rest.substring(known.length).trimLeft();
       if (newScheme.hasMatch(after)) {
+        final weight = RegExp(
+          r'\s*(?:\bat\s+\d+(?:\.\d+)?(?:\s*(?:kg|k|kilos?|pounds?|lbs?|lb))?|\d+(?:\.\d+)?\s*(?:kg|k|kilos?|pounds?|lbs?|lb))\s*$',
+        ).firstMatch(before);
+        final afterHasWeight = RegExp(
+          r'\b(?:at\s+\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:kg|k|kilos?|pounds?|lbs?|lb))\b',
+        ).hasMatch(after);
+        var keptWeight = '';
+        if (weight != null && !afterHasWeight) {
+          keptWeight = before.substring(weight.start).trim();
+          before = before.substring(0, weight.start);
+        }
         before = before.replaceFirst(scheme, '');
         before = before.replaceFirst(name, '');
+        before = '${before.trim()} $keptWeight'.trim();
       } else {
         final tail = scheme.firstMatch(before);
         final head = tail == null ? before : before.substring(0, tail.start);
@@ -159,6 +172,33 @@ String _corrections(String text, Iterable<String> exercises) {
     }
     current = '${before.trim()} ${rest.trim()}'.trim();
   }
+}
+
+/// "at 140 no wait 1 50" is still a weight, so the replacement is 150.
+String _composeWeightCorrection(String before, String rest) {
+  final replacingWeight = RegExp(
+    r'(?:\bat\s+\d+(?:\.\d+)?(?:\s*(?:kg|k|kilos?|pounds?|lbs?|lb))?|\d+(?:\.\d+)?\s*(?:kg|k|kilos?|pounds?|lbs?|lb))\s*$',
+  ).hasMatch(before);
+  if (!replacingWeight) {
+    return rest;
+  }
+  final tens = RegExp(r'^(\d)\s+(\d{2})\b').firstMatch(rest);
+  if (tens != null) {
+    final lead = int.parse(tens.group(1)!);
+    final tail = int.parse(tens.group(2)!);
+    if (lead >= 1 && lead <= 9 && tail >= 10 && tail < 100) {
+      return '${lead * 100 + tail}${rest.substring(tens.end)}';
+    }
+  }
+  final oh = RegExp(r'^(\d)\s+0\s+(\d)\b').firstMatch(rest);
+  if (oh != null) {
+    final lead = int.parse(oh.group(1)!);
+    final tail = int.parse(oh.group(2)!);
+    if (lead >= 1 && lead <= 9 && tail <= 9) {
+      return '${lead * 100 + tail}${rest.substring(oh.end)}';
+    }
+  }
+  return rest;
 }
 
 String? _knownExercise(String rest, List<String> names) {
@@ -286,10 +326,60 @@ _ReadInt _finishHundred(List<String> tokens, int start, int hundreds, String hun
   return _ReadInt(value, consumed, suffix);
 }
 
-/// Plate speech runs with the other number words, before corrections, so
-/// "one forty no wait one fifty" is 140 then 150. "one oh two" is 102 and
-/// "two twenty" is 220.
+const _weightUnits = {
+  'kg',
+  'kgs',
+  'kilo',
+  'kilos',
+  'kilogram',
+  'kilograms',
+  'pound',
+  'pounds',
+  'lb',
+  'lbs',
+};
+
+/// A casual plate ("two twenty", "one oh two") is a weight only when it
+/// follows "at" or sits immediately before kg/kilos (optionally "point five").
+bool _weightContext(List<String> tokens, int start, int consumed) {
+  if (start > 0 && _splitWord(tokens[start - 1])?.word == 'at') {
+    return true;
+  }
+  return _weightUnitFollows(tokens, start + consumed);
+}
+
+bool _weightUnitFollows(List<String> tokens, int index) {
+  var cursor = index;
+  if (cursor < tokens.length) {
+    final point = _splitWord(tokens[cursor]);
+    if (point != null &&
+        point.word == 'point' &&
+        point.suffix.isEmpty &&
+        cursor + 1 < tokens.length) {
+      final fraction = _splitWord(tokens[cursor + 1]);
+      if (fraction != null && _ones.containsKey(fraction.word)) {
+        cursor += 2;
+      }
+    }
+  }
+  if (cursor >= tokens.length) {
+    return false;
+  }
+  final word = _splitWord(tokens[cursor])?.word;
+  return word != null && _weightUnits.contains(word);
+}
+
+/// Plate speech runs before corrections, and only in a weight.
+/// "at one forty" is 140. "two twenty kilos" is 220. "two twenty minutes" is not.
 _ReadInt? _readPlate(List<String> tokens, int start) {
+  final shaped = _plateShape(tokens, start);
+  if (shaped == null || !_weightContext(tokens, start, shaped.consumed)) {
+    return null;
+  }
+  return shaped;
+}
+
+_ReadInt? _plateShape(List<String> tokens, int start) {
   final first = _splitWord(tokens[start]);
   if (first == null) {
     return null;
