@@ -25,6 +25,7 @@ bool confirmNeedsReview(ParseResult result) {
           set.heavy ||
           set.rejected ||
           set.summary.contains('?') ||
+          _implausibleScheme(set) ||
           _emptyStrength(set)) {
         return true;
       }
@@ -43,13 +44,20 @@ bool confirmNeedsReview(ParseResult result) {
   return false;
 }
 
+bool _implausibleScheme(ParsedSet set) {
+  final sets = set.sets;
+  final reps = set.reps;
+  return (sets != null && sets > 20) || (reps != null && reps > 100);
+}
+
 bool _emptyStrength(ParsedSet set) {
   final timedHold = set.bodyweight && _hasDuration(set.notes);
+  final namedBodyweight = set.explicitBodyweight && set.bodyweight;
   return set.category == 'strength' &&
       set.sets == null &&
       set.reps == null &&
       set.weightKg == null &&
-      !set.explicitBodyweight &&
+      !namedBodyweight &&
       !timedHold;
 }
 
@@ -57,9 +65,28 @@ bool _hasDuration(String? notes) {
   if (notes == null || notes.isEmpty) {
     return false;
   }
+  final held = _withoutRest(notes);
   return RegExp(
     r'\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\b',
-  ).hasMatch(notes);
+  ).hasMatch(held);
+}
+
+String _withoutRest(String notes) {
+  var held = notes;
+  held = held.replaceAll(
+    RegExp(
+      r'\b(?:rested|rest|break)\s+\d+(?:\.\d+)?(?:\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?))?',
+    ),
+    ' ',
+  );
+  held = held.replaceAll(
+    RegExp(
+      r'\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\s+(?:rested|rest|break)\b',
+    ),
+    ' ',
+  );
+  held = held.replaceAll(RegExp(r'\b(?:rested|rest|break)\b'), ' ');
+  return held;
 }
 
 class ConfirmCard extends StatefulWidget {

@@ -118,6 +118,9 @@ class ParsedSet {
       }
       return load == null ? core : '$core · $load';
     }
+    if (loadFlagged) {
+      return '$name · ?';
+    }
     if (load != null) {
       return '$name · $load';
     }
@@ -188,6 +191,8 @@ class ParsedSession {
   final List<ParsedBlock> blocks;
   String raw;
   String? notes;
+
+  final List<_PendingRest> _pendingRests = [];
 
   String get summary {
     if (ambiguous && sets.isEmpty) {
@@ -326,6 +331,7 @@ class VoiceParser {
       }
     }
     final sessions = _mergeGym(_attachRestOnly(parsed));
+    _applyPendingRests(sessions);
     for (final session in sessions) {
       _publishSetRestNotes(session);
       session.raw = spoken;
@@ -340,15 +346,20 @@ class VoiceParser {
 
   ParsedSession _parseEntry(String text, Exercise? lastExercise) {
     final original = text;
-    final noted = _pullRest(text);
+    // Pull "for N minutes" before a rest, so "for 2 minutes rest 90"
+    // cannot be read as the scheme "60 for 90".
+    final ahead = _pullForDuration(text);
+    final noted = _pullRest(ahead.text);
     if (noted.text.isEmpty) {
       return ParsedSession(
         type: 'other',
-        notes: noted.notes,
+        notes: _joinNotes(ahead.notes, noted.notes),
         raw: original,
       );
     }
-    text = noted.text;
+    text = ahead.notes == null
+        ? noted.text
+        : '${noted.text} ${ahead.notes}'.replaceAll(RegExp(r'\s+'), ' ').trim();
     final durationAmbiguous = _ambiguousAmount(
       text,
       'minutes|mins|min|hours|hour|hrs|hr',
@@ -778,7 +789,7 @@ class VoiceParser {
   }
 
   bool _isContinuation(String text) {
-    if (_startsEntry(text)) {
+    if (_isRestFragment(text) || _startsEntry(text)) {
       return false;
     }
     final stripped = text
@@ -1294,10 +1305,10 @@ _Load _resolveLoad(
     return const _Load(flagged: true);
   }
   final weight = slots.weightKg;
-  return _Load(
-    weightKg: weight,
-    bodyweight: slots.bodyweight && weight == null,
-  );
+  if (slots.bodyweight && weight == null) {
+    return const _Load(flagged: true);
+  }
+  return _Load(weightKg: weight);
 }
 
 double? _plusAmount(String text) {
@@ -1603,17 +1614,29 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
 List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
   final kept = <ParsedSession>[];
   String? pending;
-  for (final item in items) {
+  for (var i = 0; i < items.length; i++) {
+    final item = items[i];
     if (_isRestOnly(item)) {
       pending = _joinNotes(pending, item.notes);
       continue;
     }
     if (pending != null && item.type == 'gym') {
-      _giveRestNote(item, pending, leading: true);
+      final run = <ParsedSession>[item];
+      var j = i + 1;
+      while (j < items.length && items[j].type == 'gym') {
+        run.add(items[j]);
+        j++;
+      }
+      i = j - 1;
+      final merged = run.length == 1 ? item : _mergeGym(run).single;
+      _giveRestNote(merged, pending, leading: true);
       pending = null;
-    } else if (pending != null) {
+      kept.add(merged);
+      continue;
+    }
+    if (pending != null) {
       if (kept.isNotEmpty) {
-        _giveRestNote(kept.last, pending, leading: false);
+        _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
       } else {
         kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
       }
@@ -1648,23 +1671,84 @@ ParsedSession _collapseTrailingGym(List<ParsedSession> kept) {
 }
 
 void _publishSetRestNotes(ParsedSession session) {
-  for (final set in session.sets) {
+  for (var index = 0; index < session.sets.length; index++) {
+    final set = session.sets[index];
     final note = set.notes;
     final name = set.exerciseName;
     if (note == null || note.isEmpty || name == null) {
       continue;
     }
-    if (!RegExp(r'\b(?:rest|rested|break)\b').hasMatch(note)) {
+    final parts = [
+      for (final part in note.split('; '))
+        if (RegExp(r'\b(?:rest|rested|break)\b').hasMatch(part)) part,
+    ];
+    if (parts.isEmpty) {
       continue;
     }
-    final label = set.spoken.trim().isEmpty
-        ? name.toLowerCase()
-        : set.spoken.trim().toLowerCase();
-    final line = '$label: $note';
-    if ((session.notes ?? '').contains(line)) {
+    final label = _restLabel(session, set, index);
+    var current = session.notes ?? '';
+    for (final part in parts) {
+      current = _dropExact(current, part);
+      final line = '$label: $part';
+      if (current.split('; ').contains(line)) {
+        continue;
+      }
+      current = current.isEmpty ? line : '${_dropExact(current, line)}; $line';
+    }
+    session.notes = current.isEmpty ? null : current;
+  }
+}
+
+String _restLabel(ParsedSession session, ParsedSet set, int index) {
+  final base = set.spoken.trim().isEmpty
+      ? (set.exerciseName ?? '').toLowerCase()
+      : set.spoken.trim().toLowerCase();
+  var copies = 0;
+  var sameScheme = 0;
+  for (final other in session.sets) {
+    final otherBase = other.spoken.trim().isEmpty
+        ? (other.exerciseName ?? '').toLowerCase()
+        : other.spoken.trim().toLowerCase();
+    if (otherBase != base) {
       continue;
     }
-    session.notes = _joinNotes(session.notes, line);
+    copies++;
+    if (other.sets == set.sets && other.reps == set.reps) {
+      sameScheme++;
+    }
+  }
+  if (copies < 2) {
+    return base;
+  }
+  if (set.sets != null && set.reps != null && sameScheme < 2) {
+    return '$base ${set.sets}x${set.reps}';
+  }
+  return '$base set ${index + 1}';
+}
+
+String _dropExact(String notes, String part) {
+  final kept = [
+    for (final item in notes.split('; '))
+      if (item.isNotEmpty && item != part) item,
+  ];
+  return kept.join('; ');
+}
+
+class _PendingRest {
+  _PendingRest(this.set, this.note, {required this.leading});
+
+  final ParsedSet set;
+  final String note;
+  final bool leading;
+}
+
+void _applyPendingRests(List<ParsedSession> sessions) {
+  for (final session in sessions) {
+    for (final pending in session._pendingRests) {
+      pending.set.notes = pending.leading
+          ? _joinNotes(pending.note, pending.set.notes)
+          : _joinNotes(pending.set.notes, pending.note);
+    }
   }
 }
 
@@ -1676,7 +1760,12 @@ void _giveRestNote(ParsedSession session, String note, {required bool leading}) 
     return;
   }
   final set = leading ? session.sets.first : session.sets.last;
-  set.notes = leading ? _joinNotes(note, set.notes) : _joinNotes(set.notes, note);
+  session._pendingRests.add(_PendingRest(set, note, leading: leading));
+}
+
+bool _isRestFragment(String text) {
+  final noted = _pullRest(text);
+  return noted.text.isEmpty && noted.notes != null && noted.notes!.isNotEmpty;
 }
 
 bool _isRestOnly(ParsedSession session) {

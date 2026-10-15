@@ -534,7 +534,7 @@ void main() {
     expect(seconds.sessions.single.sets, isNotEmpty);
   });
 
-  test('a timed bodyweight hold and an explicit bodyweight are not empty', () {
+  test('a timed bodyweight hold is not empty', () {
     final seconds = parser.parse('plank 60 seconds');
     expect(seconds.sessions.single.sets.single.exerciseName, 'Plank');
     expect(seconds.sessions.single.sets.single.bodyweight, isTrue);
@@ -551,10 +551,9 @@ void main() {
     expect(bare.sessions.single.sets.single.weightKg, isNull);
     expect(confirmNeedsReview(bare), isTrue);
 
-    final named = parser.parse('squat bodyweight');
-    expect(named.sessions.single.sets.single.exerciseName, 'Back squat');
+    final named = parser.parse('pull ups bodyweight');
+    expect(named.sessions.single.sets.single.bodyweight, isTrue);
     expect(named.sessions.single.sets.single.explicitBodyweight, isTrue);
-    expect(named.sessions.single.sets.single.weightKg, isNull);
     expect(confirmNeedsReview(named), isFalse);
   });
 
@@ -631,5 +630,147 @@ void main() {
       ),
     );
     expect(find.textContaining('bench: rest 90'), findsOneWidget);
+  });
+
+  test('a rest duration does not make an empty bodyweight set save', () {
+    for (final phrase in [
+      'pull ups rest 90 seconds',
+      'pull ups, rest 90 seconds',
+      'dips rest 2 minutes',
+    ]) {
+      final parsed = parser.parse(phrase);
+      final set = parsed.sessions.single.sets.single;
+      expect(set.sets, isNull, reason: phrase);
+      expect(set.reps, isNull, reason: phrase);
+      expect(set.weightKg, isNull, reason: phrase);
+      expect(set.bodyweight, isTrue, reason: phrase);
+      expect(confirmNeedsReview(parsed), isTrue, reason: phrase);
+    }
+  });
+
+  test('editing a session replaces the named rest note', () async {
+    final store = await openStore();
+    await store.saveParse(parser.parse('bench 3x8 at 60 rest 2 minutes'));
+    final saved = await store.loadDay(DateTime(2026, 10, 12));
+    expect(saved.sessions.single.notes, 'bench: rest 2 minutes');
+
+    await store.replaceSession(
+      saved.sessions.single.id,
+      parser.parse('squat 5x5 at 100 rest 3 minutes'),
+    );
+    final edited = await store.loadDay(DateTime(2026, 10, 12));
+    expect(edited.sessions, hasLength(1));
+    expect(edited.sessions.single.notes, 'squat: rest 3 minutes');
+    expect(edited.sessions.single.notes, isNot(contains('bench')));
+  });
+
+  test('for N minutes is kept apart from the following rest', () {
+    final bench = parser.parse('bench 3x8 at 60 for 2 minutes rest 90');
+    final benchSet = bench.sessions.single.sets.single;
+    expect(benchSet.sets, 3);
+    expect(benchSet.reps, 8);
+    expect(benchSet.weightKg, 60);
+    expect(benchSet.summary, 'Bench press · 3×8 · 60 kg');
+    expect(bench.sessions.single.notes, contains('for 2 minutes'));
+    expect(bench.sessions.single.notes, contains('bench: rest 90'));
+    expect(bench.sessions.single.notes, isNot(contains('60×90')));
+    expect(confirmNeedsReview(bench), isFalse);
+
+    final squat = parser.parse('squat 5x5 at 100 for 3 minutes rest 2 minutes');
+    final squatSet = squat.sessions.single.sets.single;
+    expect(squatSet.sets, 5);
+    expect(squatSet.reps, 5);
+    expect(squatSet.weightKg, 100);
+    expect(squat.sessions.single.notes, contains('for 3 minutes'));
+    expect(squat.sessions.single.notes, contains('squat: rest 2 minutes'));
+    expect(squat.sessions.single.notes, isNot(contains('3 minutes rest')));
+    expect(confirmNeedsReview(squat), isFalse);
+  });
+
+  test('an implausible scheme waits for review', () {
+    final sets = parser.parse('bench 21x8 at 60');
+    expect(sets.sessions.single.sets.single.sets, 21);
+    expect(sets.sessions.single.sets.single.reps, 8);
+    expect(confirmNeedsReview(sets), isTrue);
+
+    final reps = parser.parse('bench 3x101 at 60');
+    expect(reps.sessions.single.sets.single.reps, 101);
+    expect(confirmNeedsReview(reps), isTrue);
+
+    expect(confirmNeedsReview(parser.parse('bench 20x8 at 60')), isFalse);
+    expect(confirmNeedsReview(parser.parse('bench 3x100 at 60')), isFalse);
+  });
+
+  test('a rest note is stored once, under the exercise name', () {
+    final once = parser.parse('bench 3x8 at 60 rest 90');
+    expect(once.sessions.single.notes, 'bench: rest 90');
+
+    final twice = parser.parse('bench 3x8 at 60 rest 90 rest 90');
+    expect(twice.sessions.single.notes, 'bench: rest 90');
+  });
+
+  test('the same exercise twice names the scheme on the rest', () {
+    final parsed = parser.parse(
+      'bench 3x8 at 60 rest 2 then bench 3x5 at 70 rest 90',
+    );
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(parsed.sessions.single.notes, contains('bench 3x8: rest 2'));
+    expect(parsed.sessions.single.notes, contains('bench 3x5: rest 90'));
+    expect(parsed.sessions.single.notes, isNot(contains('bench: rest')));
+  });
+
+  test('bodyweight is only accepted on a bodyweight exercise', () {
+    final bench = parser.parse('bench bodyweight');
+    expect(bench.sessions.single.sets.single.exerciseName, 'Bench press');
+    expect(bench.sessions.single.sets.single.bodyweight, isFalse);
+    expect(bench.sessions.single.sets.single.loadFlagged, isTrue);
+    expect(confirmNeedsReview(bench), isTrue);
+
+    final squat = parser.parse('squat bodyweight');
+    expect(squat.sessions.single.sets.single.bodyweight, isFalse);
+    expect(squat.sessions.single.sets.single.loadFlagged, isTrue);
+    expect(confirmNeedsReview(squat), isTrue);
+  });
+
+  test('a leading rest stays on the first lift of the run', () {
+    final parsed = parser.parse(
+      'rest 2 then bench 3x8 at 60 then squat 5x5 at 100',
+    );
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(sets.first.exerciseName, 'Bench press');
+    expect(sets.first.notes, 'rest 2');
+    expect(sets.last.notes, isNull);
+    expect(parsed.sessions.single.notes, contains('bench: rest 2'));
+    expect(parsed.sessions.single.notes, isNot(contains('squat: rest')));
+  });
+
+  test('a rest before a later run stays on the previous lift', () {
+    final parsed = parser.parse(
+      'row 3x10 at 40 then bench 3x8 at 60 then rest 2 then ran 5k',
+    );
+    expect(parsed.sessions.map((session) => session.type), ['gym', 'run']);
+    final sets = parsed.sessions.first.sets;
+    expect(sets, hasLength(2));
+    expect(sets.first.exerciseName, 'Barbell row');
+    expect(sets.first.notes, isNull);
+    expect(sets.last.exerciseName, 'Bench press');
+    expect(sets.last.notes, 'rest 2');
+    expect(parsed.sessions.first.notes, contains('bench: rest 2'));
+    expect(parsed.sessions.last.notes, isNull);
+    expect(parsed.sessions.last.distanceKm, 5);
+  });
+
+  test('a trailing rest after two lifts needs the gym tail merged', () {
+    final parsed = parser.parse(
+      'bench 3x8 at 60 then squat 5x5 at 100 then rest 90',
+    );
+    expect(parsed.sessions, hasLength(1));
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(sets.first.notes, isNull);
+    expect(sets.last.notes, 'rest 90');
+    expect(parsed.sessions.single.notes, 'squat: rest 90');
   });
 }

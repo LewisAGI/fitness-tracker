@@ -286,6 +286,7 @@ class Store extends ChangeNotifier {
           'type': first.type,
           'duration_min': first.durationMin,
           'rpe': first.rpe,
+          'notes': first.notes,
           'raw_transcript': first.raw,
         },
         where: 'id = ?',
