@@ -870,4 +870,99 @@ void main() {
     );
     expect(confirmNeedsReview(result), isTrue);
   });
+
+  test('a barbell scheme said as bodyweight is held', () {
+    final bench = parser.parse('bench 5x5 bodyweight');
+    final benchSet = bench.sessions.single.sets.single;
+    expect(benchSet.exerciseName, 'Bench press');
+    expect(benchSet.sets, 5);
+    expect(benchSet.reps, 5);
+    expect(benchSet.bodyweight, isFalse);
+    expect(benchSet.loadFlagged, isTrue);
+    expect(benchSet.summary, 'Bench press · 5×5 · ?');
+    expect(confirmNeedsReview(bench), isTrue);
+
+    final deadlift = parser.parse('deadlift 5x5 bodyweight');
+    final deadliftSet = deadlift.sessions.single.sets.single;
+    expect(deadliftSet.exerciseName, 'Deadlift');
+    expect(deadliftSet.bodyweight, isFalse);
+    expect(deadliftSet.loadFlagged, isTrue);
+    expect(confirmNeedsReview(deadlift), isTrue);
+
+    final lunge = parser.parse('lunge 3x10 bodyweight');
+    expect(lunge.sessions.single.sets.single.bodyweight, isTrue);
+    expect(lunge.sessions.single.sets.single.loadFlagged, isFalse);
+    expect(confirmNeedsReview(lunge), isFalse);
+
+    final stepUp = parser.parse('step up 3x10 bodyweight');
+    expect(stepUp.sessions.single.sets.single.exerciseName, 'Step-up');
+    expect(stepUp.sessions.single.sets.single.bodyweight, isTrue);
+    expect(confirmNeedsReview(stepUp), isFalse);
+  });
+
+  test('a separate duration does not excuse an implausible scheme', () {
+    final parsed = parser.parse('push ups 3x500 for 10 minutes');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, 3);
+    expect(set.reps, 500);
+    expect(set.bodyweight, isTrue);
+    expect(set.notes, contains('for 10 minutes'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a weighted timed lift stays under the rep limit', () {
+    final parsed = parser.parse('bench 3x120 seconds at 60');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 120);
+    expect(set.weightKg, 60);
+    expect(set.bodyweight, isFalse);
+    expect(set.notes, contains('120 seconds'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('sets without reps do not become a bodyweight load', () {
+    final parsed = parser.parse('squat 5 sets bodyweight');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Back squat');
+    expect(set.sets, 5);
+    expect(set.reps, isNull);
+    expect(set.bodyweight, isFalse);
+    expect(set.loadFlagged, isTrue);
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a bodyweight duration beside a huge scheme keeps the set', () {
+    final parsed = parser.parse('push ups 30x200 bodyweight 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'gym');
+    expect(parsed.sessions.single.summary, isNot(contains('Other')));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, 30);
+    expect(set.reps, 200);
+    expect(set.bodyweight, isTrue);
+    expect(set.notes, contains('2 minutes'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a rest between a gym tail and a later lift stays on the tail', () {
+    final parsed = parser.parse(
+      'bench 3x8 at 60 then squat 5x5 at 100 then rest 2 then row 3x10 at 40',
+    );
+    expect(parsed.sessions, hasLength(1));
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(3));
+    expect(sets[0].exerciseName, 'Bench press');
+    expect(sets[0].notes, isNull);
+    expect(sets[1].exerciseName, 'Back squat');
+    expect(sets[1].notes, 'rest 2');
+    expect(sets[2].exerciseName, 'Barbell row');
+    expect(sets[2].notes, isNull);
+    expect(parsed.sessions.single.notes, contains('squat: rest 2'));
+    expect(parsed.sessions.single.notes, isNot(contains('row: rest')));
+    expect(parsed.sessions.single.notes, isNot(contains('bench: rest')));
+  });
 }

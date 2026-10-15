@@ -45,12 +45,25 @@ bool confirmNeedsReview(ParseResult result) {
 }
 
 bool _implausibleScheme(ParsedSet set) {
-  if (set.bodyweight && _hasDuration(set.notes)) {
+  if (set.bodyweight && _repsAreTheTime(set)) {
     return false;
   }
   final sets = set.sets;
   final reps = set.reps;
   return (sets != null && sets > 20) || (reps != null && reps > 100);
+}
+
+/// A timed hold stores the rep count as the scheme duration ("120 seconds").
+/// A separate "for 10 minutes" does not.
+bool _repsAreTheTime(ParsedSet set) {
+  final reps = set.reps;
+  final notes = set.notes;
+  if (reps == null || notes == null || notes.isEmpty) {
+    return false;
+  }
+  return RegExp(
+    '(?<!for )\\b$reps\\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\\b',
+  ).hasMatch(notes);
 }
 
 bool _emptyStrength(ParsedSet set) {

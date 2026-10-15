@@ -463,9 +463,12 @@ class VoiceParser {
 
     final timed = _pullForDuration(text);
     text = timed.text;
+    final schemeNote = _schemeDuration(text);
+    final loose = _pullSpokenBodyweightDuration(text);
+    text = loose.text;
     final liftNotes = _joinNotes(
-      _joinNotes(noted.notes, timed.notes),
-      _schemeDuration(text),
+      _joinNotes(_joinNotes(noted.notes, timed.notes), loose.notes),
+      schemeNote,
     );
     final slots = _strengthSlots(text);
     final stray = _strayDigits(text);
@@ -689,6 +692,9 @@ class VoiceParser {
       if (word == 'for' && _forDurationBelongsToLift(text)) {
         continue;
       }
+      if (_isBodyweightWord(word, text, match.start)) {
+        continue;
+      }
       if (_hasExactExercise(exercises, word)) {
         continue;
       }
@@ -832,6 +838,9 @@ class VoiceParser {
     }
     final word = match.group(1)!;
     if (_subtypeIn(word) != null || _blockedActivity(word)) {
+      return false;
+    }
+    if (_isBodyweightWord(word, text, match.start)) {
       return false;
     }
     return !_hasExactExercise(exercises, word);
@@ -1183,6 +1192,41 @@ String? _schemeDuration(String text) {
   return '${match.group(1)} ${match.group(2)}';
 }
 
+/// "bodyweight 2 minutes" beside a scheme is a note, not a second session.
+_Noted _pullSpokenBodyweightDuration(String text) {
+  final spoken = RegExp(r'\b(?:body\s*weight|bw)\b').hasMatch(text);
+  final scheme = RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\b').hasMatch(text);
+  if (!spoken || !scheme) {
+    return _Noted(text, null);
+  }
+  final pattern = RegExp(
+    r'\b(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?)\b',
+  );
+  for (final match in pattern.allMatches(text)) {
+    final prior = text.substring(0, match.start);
+    if (RegExp(r'\b\d+\s*(?:x|×|by)\s*$').hasMatch(prior)) {
+      continue;
+    }
+    final current =
+        '${text.substring(0, match.start)} ${text.substring(match.end)}';
+    return _Noted(
+      current.replaceAll(RegExp(r'\s+'), ' ').trim(),
+      match.group(0),
+    );
+  }
+  return _Noted(text, null);
+}
+
+bool _isBodyweightWord(String word, String text, int start) {
+  if (word == 'bodyweight' || word == 'bw') {
+    return true;
+  }
+  if (word != 'weight' || start == 0) {
+    return false;
+  }
+  return RegExp(r'\bbody\s+$').hasMatch(text.substring(0, start));
+}
+
 _Noted _pullForDuration(String text) {
   final match = RegExp(
     r'\bfor\s+\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\b',
@@ -1320,12 +1364,35 @@ _Load _resolveLoad(
   }
   final weight = slots.weightKg;
   if (slots.bodyweight && weight == null) {
-    if (slots.sets != null && slots.reps != null) {
+    if (_bodyweightCapable(exercise) &&
+        slots.sets != null &&
+        slots.reps != null) {
       return const _Load(bodyweight: true);
     }
     return const _Load(flagged: true);
   }
   return _Load(weightKg: weight);
+}
+
+/// Seed bodyweight moves, plus squats, lunges, and step-ups. The seed
+/// flag stays false on a squat so a bare number is still kilograms.
+bool _bodyweightCapable(Exercise? exercise) {
+  if (exercise == null) {
+    return false;
+  }
+  if (exercise.bodyweight) {
+    return true;
+  }
+  const names = {
+    'Back squat',
+    'Front squat',
+    'Goblet squat',
+    'Bulgarian split squat',
+    'Lunge',
+    'Walking lunge',
+    'Step-up',
+  };
+  return names.contains(exercise.name);
 }
 
 double? _plusAmount(String text) {
@@ -1370,6 +1437,7 @@ bool _strayDigits(String text) {
   rest = rest.replaceAll(RegExp(r'\b\d+\s*sets?\s+of\s+\d+\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+reps?\s+\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\s+\d+\s+reps?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+for\s+\d+\b'), ' ');
   rest = _pullRest(rest).text;
   rest = rest.replaceAll(
@@ -1587,6 +1655,11 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     } else if (by != null) {
       sets = int.parse(by.group(1)!);
       reps = int.parse(by.group(2)!);
+    } else {
+      final bareSets = RegExp(r'\b(\d+)\s+sets?\b').firstMatch(text);
+      if (bareSets != null) {
+        sets = int.parse(bareSets.group(1)!);
+      }
     }
     double? weight;
     final atKg = RegExp(
