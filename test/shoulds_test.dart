@@ -965,4 +965,177 @@ void main() {
     expect(parsed.sessions.single.notes, isNot(contains('row: rest')));
     expect(parsed.sessions.single.notes, isNot(contains('bench: rest')));
   });
+
+  test('sets with no reps wait unless the set is timed', () {
+    for (final phrase in [
+      'bench 3 sets',
+      'squat 3 sets at 100',
+      'squat 5 sets at 100',
+    ]) {
+      final parsed = parser.parse(phrase);
+      final set = parsed.sessions.single.sets.single;
+      expect(set.sets, isNotNull, reason: phrase);
+      expect(set.reps, isNull, reason: phrase);
+      expect(confirmNeedsReview(parsed), isTrue, reason: phrase);
+    }
+
+    final weighted = parser.parse('squat 5 sets at 100');
+    expect(weighted.sessions.single.sets.single.weightKg, 100);
+    expect(weighted.sessions.single.sets.single.exerciseName, 'Back squat');
+
+    final timed = parser.parse('plank 3 sets for 60 seconds');
+    final hold = timed.sessions.single.sets.single;
+    expect(hold.exerciseName, 'Plank');
+    expect(hold.sets, 3);
+    expect(hold.reps, isNull);
+    expect(hold.bodyweight, isTrue);
+    expect(hold.notes, contains('60 seconds'));
+    expect(confirmNeedsReview(timed), isFalse);
+  });
+
+  test('a rest of the same count is not the scheme duration', () {
+    final parsed = parser.parse('push ups 3x200 rest 200 seconds');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, 3);
+    expect(set.reps, 200);
+    expect(set.bodyweight, isTrue);
+    expect(set.notes, contains('rest 200 seconds'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a timed hold longer than 600 seconds waits', () {
+    final under = parser.parse('plank 3x500 seconds');
+    expect(under.sessions.single.sets.single.reps, 500);
+    expect(under.sessions.single.sets.single.bodyweight, isTrue);
+    expect(confirmNeedsReview(under), isFalse);
+
+    final edge = parser.parse('plank 3x600 seconds');
+    expect(edge.sessions.single.sets.single.reps, 600);
+    expect(confirmNeedsReview(edge), isFalse);
+
+    final over = parser.parse('plank 3x601 seconds');
+    expect(over.sessions.single.sets.single.reps, 601);
+    expect(over.sessions.single.sets.single.notes, contains('601 seconds'));
+    expect(confirmNeedsReview(over), isTrue);
+
+    final ten = parser.parse('plank 3x10 minutes');
+    expect(ten.sessions.single.sets.single.reps, 10);
+    expect(confirmNeedsReview(ten), isFalse);
+
+    final eleven = parser.parse('plank 3x11 minutes');
+    expect(eleven.sessions.single.sets.single.reps, 11);
+    expect(eleven.sessions.single.sets.single.notes, contains('11 minutes'));
+    expect(confirmNeedsReview(eleven), isTrue);
+  });
+
+  test('air squat and pistol squat are their own bodyweight moves', () {
+    expect(
+      seedExercises().firstWhere((exercise) => exercise.name == 'Air squat').bodyweight,
+      isTrue,
+    );
+    expect(
+      seedExercises().firstWhere((exercise) => exercise.name == 'Pistol squat').bodyweight,
+      isTrue,
+    );
+
+    final air = parser.parse('air squat 5x5 bodyweight');
+    expect(air.sessions.single.sets.single.exerciseName, 'Air squat');
+    expect(air.sessions.single.sets.single.bodyweight, isTrue);
+    expect(air.sessions.single.sets.single.loadFlagged, isFalse);
+    expect(confirmNeedsReview(air), isFalse);
+
+    final pistol = parser.parse('pistol squat 5x5');
+    expect(pistol.sessions.single.sets.single.exerciseName, 'Pistol squat');
+    expect(pistol.sessions.single.sets.single.bodyweight, isTrue);
+    expect(confirmNeedsReview(pistol), isFalse);
+
+    expect(
+      parser.parse('squat 5x5 at 100').sessions.single.sets.single.exerciseName,
+      'Back squat',
+    );
+  });
+
+  test('hip thrust and calf raise can be bodyweight', () {
+    expect(
+      seedExercises().firstWhere((exercise) => exercise.name == 'Hip thrust').bodyweight,
+      isFalse,
+    );
+    expect(
+      seedExercises().firstWhere((exercise) => exercise.name == 'Calf raise').bodyweight,
+      isFalse,
+    );
+
+    final hip = parser.parse('hip thrust 3x8 bodyweight');
+    expect(hip.sessions.single.sets.single.exerciseName, 'Hip thrust');
+    expect(hip.sessions.single.sets.single.bodyweight, isTrue);
+    expect(hip.sessions.single.sets.single.loadFlagged, isFalse);
+    expect(confirmNeedsReview(hip), isFalse);
+
+    final calf = parser.parse('calf raise 3x12 bodyweight');
+    expect(calf.sessions.single.sets.single.exerciseName, 'Calf raise');
+    expect(calf.sessions.single.sets.single.bodyweight, isTrue);
+    expect(confirmNeedsReview(calf), isFalse);
+
+    final weighted = parser.parse('hip thrust 3x8 at 100');
+    expect(weighted.sessions.single.sets.single.weightKg, 100);
+    expect(weighted.sessions.single.sets.single.bodyweight, isFalse);
+    expect(confirmNeedsReview(weighted), isFalse);
+  });
+
+  test('a walking lunge with a scheme can be bodyweight', () {
+    final parsed = parser.parse('walking lunge 3x10 bodyweight');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Walking lunge');
+    expect(set.sets, 3);
+    expect(set.reps, 10);
+    expect(set.bodyweight, isTrue);
+    expect(set.loadFlagged, isFalse);
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('a seed bodyweight move keeps a spoken scheme', () {
+    final parsed = parser.parse('pull ups 5x5 bodyweight');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Pull-up');
+    expect(set.sets, 5);
+    expect(set.reps, 5);
+    expect(set.bodyweight, isTrue);
+    expect(set.loadFlagged, isFalse);
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('a bodyweight duration without a scheme stays held', () {
+    final parsed = parser.parse('push ups bodyweight 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, isNull);
+    expect(set.reps, isNull);
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a bodyweight duration after a comma stays on the lift', () {
+    final parsed = parser.parse('push ups 30x200, bodyweight 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'gym');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, 30);
+    expect(set.reps, 200);
+    expect(set.notes, contains('2 minutes'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('body weight beside a scheme stays on the lift', () {
+    final parsed = parser.parse('push ups 30x200 body weight 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'gym');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, 30);
+    expect(set.reps, 200);
+    expect(set.summary, isNot(contains('Other')));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
 }

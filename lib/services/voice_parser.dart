@@ -1354,7 +1354,11 @@ _Load _resolveLoad(
     if (slots.weightKg != null) {
       return const _Load(flagged: true);
     }
-    return const _Load(bodyweight: true);
+    final spokenScheme =
+        slots.bodyweight && slots.sets != null && slots.reps != null;
+    if (!spokenScheme) {
+      return const _Load(bodyweight: true);
+    }
   }
   if (plus != null && slots.weightKg != null && (slots.weightKg! - plus).abs() > 0.001) {
     return _Load(weightKg: slots.weightKg! + plus);
@@ -1374,8 +1378,9 @@ _Load _resolveLoad(
   return _Load(weightKg: weight);
 }
 
-/// Seed bodyweight moves, plus squats, lunges, and step-ups. The seed
-/// flag stays false on a squat so a bare number is still kilograms.
+/// Seed bodyweight moves, plus squats, lunges, step-ups, hip thrusts,
+/// and calf raises. The seed flag stays false on those last names so a
+/// bare number is still kilograms.
 bool _bodyweightCapable(Exercise? exercise) {
   if (exercise == null) {
     return false;
@@ -1391,6 +1396,9 @@ bool _bodyweightCapable(Exercise? exercise) {
     'Lunge',
     'Walking lunge',
     'Step-up',
+    'Hip thrust',
+    'Calf raise',
+    'Seated calf raise',
   };
   return names.contains(exercise.name);
 }

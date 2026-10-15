@@ -26,7 +26,8 @@ bool confirmNeedsReview(ParseResult result) {
           set.rejected ||
           set.summary.contains('?') ||
           _implausibleScheme(set) ||
-          _emptyStrength(set)) {
+          _emptyStrength(set) ||
+          _setsWithoutReps(set)) {
         return true;
       }
     }
@@ -45,6 +46,9 @@ bool confirmNeedsReview(ParseResult result) {
 }
 
 bool _implausibleScheme(ParsedSet set) {
+  if (_overlongTimedHold(set)) {
+    return true;
+  }
   if (set.bodyweight && _repsAreTheTime(set)) {
     return false;
   }
@@ -53,17 +57,50 @@ bool _implausibleScheme(ParsedSet set) {
   return (sets != null && sets > 20) || (reps != null && reps > 100);
 }
 
-/// A timed hold stores the rep count as the scheme duration ("120 seconds").
-/// A separate "for 10 minutes" does not.
-bool _repsAreTheTime(ParsedSet set) {
+/// The scheme duration ("120 seconds"), after rest text is removed.
+/// A rest of the same number, or a separate "for 10 minutes", does not count.
+int? _schemeDurationSeconds(ParsedSet set) {
   final reps = set.reps;
   final notes = set.notes;
   if (reps == null || notes == null || notes.isEmpty) {
+    return null;
+  }
+  final match = RegExp(
+    '(?<!for )\\b$reps\\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\\b',
+  ).firstMatch(_withoutRest(notes));
+  if (match == null) {
+    return null;
+  }
+  final unit = match.group(1)!;
+  if (unit.startsWith('h')) {
+    return reps * 3600;
+  }
+  if (unit.startsWith('m')) {
+    return reps * 60;
+  }
+  return reps;
+}
+
+bool _repsAreTheTime(ParsedSet set) => _schemeDurationSeconds(set) != null;
+
+/// A timed hold longer than 10 minutes waits.
+bool _overlongTimedHold(ParsedSet set) {
+  if (!set.bodyweight) {
     return false;
   }
-  return RegExp(
-    '(?<!for )\\b$reps\\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\\b',
-  ).hasMatch(notes);
+  final seconds = _schemeDurationSeconds(set);
+  return seconds != null && seconds > 600;
+}
+
+/// Sets were spoken and the reps were not. A bodyweight duration is the work.
+bool _setsWithoutReps(ParsedSet set) {
+  if (set.category != 'strength' || set.sets == null || set.reps != null) {
+    return false;
+  }
+  if (set.bodyweight && _hasDuration(set.notes)) {
+    return false;
+  }
+  return true;
 }
 
 bool _emptyStrength(ParsedSet set) {

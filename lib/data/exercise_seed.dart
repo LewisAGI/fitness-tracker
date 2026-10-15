@@ -149,6 +149,12 @@ List<Exercise> seedExercises() {
     _s('Mobility', 'mobility', ['full'], ['mobility work']),
     _s('Foam roll', 'mobility', ['full'], ['foam rolling']),
     _s('Pilates', 'mobility', ['core'], ['pilates']),
+    _s('Air squat', 'strength', ['legs', 'quads', 'glutes'], [
+      'air squats',
+    ], bodyweight: true),
+    _s('Pistol squat', 'strength', ['legs', 'quads', 'glutes'], [
+      'pistol squats',
+    ], bodyweight: true),
   ];
   return [
     for (var i = 0; i < rows.length; i++)
