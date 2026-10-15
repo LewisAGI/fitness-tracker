@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/confirm_action.dart';
 import '../widgets/confirm_card.dart';
 import '../widgets/icon_tip.dart';
+import '../widgets/pace_flag.dart';
 import 'checkin_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -129,10 +130,18 @@ class _TodayScreenState extends State<TodayScreen> {
 
   Future<void> _export(String kind) async {
     final today = dateOnly(widget.store.now());
-    final start = kind == 'week' ? weekStart(today) : DateTime(today.year, today.month);
-    final end = kind == 'week'
-        ? start.add(const Duration(days: 6))
-        : DateTime(today.year, today.month + 1, 0);
+    final DateTime start;
+    final DateTime end;
+    if (kind == 'day') {
+      start = today;
+      end = today;
+    } else if (kind == 'week') {
+      start = weekStart(today);
+      end = start.add(const Duration(days: 6));
+    } else {
+      start = DateTime(today.year, today.month);
+      end = DateTime(today.year, today.month + 1, 0);
+    }
     final files = await widget.store.exportRange(
       start: start,
       end: end,
@@ -141,7 +150,15 @@ class _TodayScreenState extends State<TodayScreen> {
     if (!mounted) {
       return;
     }
-    await shareExport(context, files);
+    await offerExport(context, files);
+  }
+
+  Future<void> _exportSession(Session session) async {
+    final files = await widget.store.exportSession(session);
+    if (!mounted) {
+      return;
+    }
+    await offerExport(context, files);
   }
 
   void _openCheckIn(String slot) {
@@ -165,9 +182,11 @@ class _TodayScreenState extends State<TodayScreen> {
         title: const Text('Today'),
         actions: [
           PopupMenuButton<String>(
+            key: const ValueKey('export-menu'),
             tooltip: 'Export',
             onSelected: _export,
             itemBuilder: (context) => const [
+              PopupMenuItem(value: 'day', child: Text('Day')),
               PopupMenuItem(value: 'week', child: Text('Week')),
               PopupMenuItem(value: 'month', child: Text('Month')),
             ],
@@ -241,14 +260,26 @@ class _TodayScreenState extends State<TodayScreen> {
                             ),
                           ),
                         ),
+                        PaceFlagIcon(
+                          session: session,
+                          goals: widget.store.goals,
+                        ),
+                        IconTip(
+                          icon: Icons.ios_share,
+                          message: 'Export',
+                          compact: true,
+                          onPressed: () => _exportSession(session),
+                        ),
                         IconTip(
                           icon: Icons.edit_outlined,
                           message: 'Edit',
+                          compact: true,
                           onPressed: () => _edit(session),
                         ),
                         IconTip(
                           icon: Icons.delete_outline,
                           message: 'Delete',
+                          compact: true,
                           onPressed: () => _delete(session),
                         ),
                       ],

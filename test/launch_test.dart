@@ -31,7 +31,7 @@ void main() {
     final path = '${directory.path}/newer.db';
     final newer = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {},
     );
     await newer.close();

@@ -1,7 +1,10 @@
 import 'dart:convert';
 
 import '../models/training.dart';
+import 'balance.dart';
 import 'dates.dart';
+import 'goals.dart';
+import 'plain_export.dart';
 
 class ExportSnapshot {
   const ExportSnapshot({
@@ -16,6 +19,7 @@ class ExportSnapshot {
     required this.suggestions,
     this.readinessByDay = const {},
     this.fatigueByDay = const {},
+    this.goals = const [],
   });
 
   final String kind;
@@ -29,16 +33,31 @@ class ExportSnapshot {
   final List<StoredSuggestion> suggestions;
   final Map<String, double> readinessByDay;
   final Map<String, double> fatigueByDay;
+  final List<Goal> goals;
 }
 
 class ExportFiles {
-  const ExportFiles({required this.json, required this.markdown});
+  const ExportFiles({
+    required this.json,
+    required this.markdown,
+    required this.plain,
+  });
 
   final String json;
   final String markdown;
+  final String plain;
 }
 
 ExportFiles buildExport(ExportSnapshot snapshot) {
+  final balance = snapshot.kind == 'week' || snapshot.kind == 'month'
+      ? balanceReports(
+          start: snapshot.start,
+          end: snapshot.end,
+          sessions: snapshot.sessions,
+          splitWeeks: snapshot.kind == 'month',
+        )
+      : const <BalanceReport>[];
+  final progress = goalProgressLines(snapshot.goals, snapshot.sessions);
   final sessions = snapshot.sessions.map(_sessionJson).toList();
   final plans = snapshot.plans.map(_planJson).toList();
   final actualByDay = <String, List<String>>{};
@@ -108,10 +127,51 @@ ExportFiles buildExport(ExportSnapshot snapshot) {
           'muscle_groups': suggestion.muscleGroups,
         },
     ],
+    'balance': [
+      for (final report in balance)
+        {
+          'start': isoDate(report.start),
+          'end': isoDate(report.end),
+          'muscles': [
+            for (final muscle in report.muscles)
+              {
+                'muscle': muscle.muscle,
+                'sets': muscle.sets,
+                'volume_kg': muscle.volumeKg,
+              },
+          ],
+          'flags': report.flags,
+        },
+    ],
+    'goals': [
+      for (final goal in snapshot.goals)
+        {
+          'id': goal.id,
+          'kind': goal.kind.name,
+          'general': goal.general,
+          'exercise_id': goal.exerciseId,
+          'exercise': goal.exerciseName,
+          'target_kg': goal.targetKg,
+          'distance_km': goal.distanceKm,
+          'target_pace_s': goal.targetPaceS,
+          'created_on': goal.createdOn,
+        },
+    ],
+    'goal_progress': progress,
   };
+  final plain = buildPlainText(
+    kind: snapshot.kind,
+    start: snapshot.start,
+    end: snapshot.end,
+    sessions: snapshot.sessions,
+    checkins: snapshot.checkins,
+    goals: snapshot.goals,
+    suggestions: snapshot.suggestions,
+  );
   return ExportFiles(
     json: const JsonEncoder.withIndent('  ').convert(body),
-    markdown: _markdown(snapshot, planVsActual),
+    markdown: _markdown(snapshot, planVsActual, balance, progress),
+    plain: plain,
   );
 }
 
@@ -189,6 +249,8 @@ Map<String, Object?> _checkInJson(CheckIn checkIn) => {
 String _markdown(
   ExportSnapshot snapshot,
   List<Map<String, Object?>> planVsActual,
+  List<BalanceReport> balance,
+  List<String> progress,
 ) {
   final buffer = StringBuffer()
     ..writeln('# Fitness Tracker')
@@ -282,6 +344,31 @@ String _markdown(
   for (final suggestion in snapshot.suggestions) {
     buffer.writeln('| ${suggestion.exerciseName} | ${suggestion.card} |');
   }
+  if (balance.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('## Balance')
+      ..writeln();
+    for (final report in balance) {
+      buffer.writeln(fmtRange(report.start, report.end));
+      for (final muscle in report.muscles) {
+        buffer.writeln(muscleLine(muscle));
+      }
+      for (final flag in report.flags) {
+        buffer.writeln(flag);
+      }
+      buffer.writeln();
+    }
+  }
+  if (progress.isNotEmpty) {
+    buffer
+      ..writeln()
+      ..writeln('## Goals')
+      ..writeln();
+    for (final line in progress) {
+      buffer.writeln(line);
+    }
+  }
   buffer
     ..writeln()
     ..writeln('## Schema')
@@ -305,7 +392,15 @@ String _markdown(
     )
     ..writeln()
     ..writeln(
-      'Overload suggestions are the rule-based next-week cards. `action` is `progress`, `keep`, `hold`, or `deload`. Weights are kilograms.',
+      'Overload suggestions are the rule-based next-week cards. `action` is `progress`, `keep`, `hold`, or `deload`. Weights are kilograms. An active general goal can change the rep range and the step.',
+    )
+    ..writeln()
+    ..writeln(
+      'Balance lists weekly sets and volume per muscle. A flag such as `upper-heavy: legs got 30% of the sets chest got` means the lighter muscle has at most 60% of the heavier muscle\'s sets, and the heavier muscle has at least 6 sets.',
+    )
+    ..writeln()
+    ..writeln(
+      'Goals are `pace` (seconds per km at a distance), `lift` (exercise and kilograms), or `general` (`strength`, `fitness`, `hypertrophy`). `goal_progress` is the weekly card line. The plain-text block is the paste for another AI.',
     );
   return buffer.toString();
 }

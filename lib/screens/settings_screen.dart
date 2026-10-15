@@ -9,6 +9,7 @@ import '../services/checkin_scheduler.dart';
 import '../services/dates.dart';
 import '../services/share_export.dart';
 import '../theme/app_theme.dart';
+import '../widgets/goals_editor.dart';
 import '../widgets/icon_tip.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -98,7 +99,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) {
       return;
     }
-    await shareExport(context, files);
+    await offerExport(context, files);
   }
 
   Future<void> _import() async {
@@ -141,6 +142,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             icon: Icons.calendar_month,
             message: 'Export month',
             onPressed: () => _export('month'),
+          ),
+          IconTip(
+            icon: Icons.track_changes,
+            message: 'Goals',
+            onPressed: () => showGoalsEditor(context, widget.store),
           ),
           IconTip(
             icon: Icons.file_download_outlined,

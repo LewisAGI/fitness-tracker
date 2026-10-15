@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/training.dart';
+import '../services/balance.dart';
 import '../services/checkin_scheduler.dart';
 import '../services/dates.dart';
 import '../services/export_summary.dart';
+import '../services/goals.dart';
 import '../services/load_model.dart';
 import '../services/overload.dart';
 import '../services/patterns.dart';
@@ -40,11 +42,15 @@ class WeekBundle {
     required this.start,
     required this.days,
     required this.suggestions,
+    required this.balance,
+    required this.goalLines,
   });
 
   final DateTime start;
   final List<DayBundle> days;
   final List<StoredSuggestion> suggestions;
+  final BalanceReport balance;
+  final List<String> goalLines;
 }
 
 class Store extends ChangeNotifier {
@@ -55,6 +61,7 @@ class Store extends ChangeNotifier {
 
   Database? _db;
   List<Exercise> exercises = [];
+  List<Goal> goals = [];
   CheckInSchedule schedule = CheckInSchedule.defaults;
   int roundMinutes = 3;
   var notificationsDenied = false;
@@ -112,6 +119,7 @@ class Store extends ChangeNotifier {
   Future<void> init({String? path}) async {
     _db = await openFitnessDatabase(path: path);
     exercises = await _readExercises();
+    goals = await _readGoals();
     schedule = await _readSchedule();
     roundMinutes = int.tryParse(await _setting('round_minutes') ?? '') ?? 3;
     notificationsDenied = (await _setting('notifications_denied') ?? '0') == '1';
@@ -184,6 +192,33 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> addGoal({
+    required GoalKind kind,
+    String? general,
+    int? exerciseId,
+    double? targetKg,
+    double? distanceKm,
+    int? targetPaceS,
+  }) async {
+    await db.insert('goals', {
+      'kind': kind.name,
+      'general': general,
+      'exercise_id': exerciseId,
+      'target_kg': targetKg,
+      'distance_km': distanceKm,
+      'target_pace_s': targetPaceS,
+      'created_on': isoDate(now()),
+    });
+    goals = await _readGoals();
+    notifyListeners();
+  }
+
+  Future<void> deleteGoal(int id) async {
+    await db.delete('goals', where: 'id = ?', whereArgs: [id]);
+    goals = await _readGoals();
+    notifyListeners();
+  }
+
   Future<void> setRoundMinutes(int minutes) async {
     final next = minutes < 1 ? 1 : minutes;
     roundMinutes = next;
@@ -229,7 +264,17 @@ class Store extends ChangeNotifier {
       days.add(await _readDay(start.add(Duration(days: i))));
     }
     final suggestions = await suggestionsForWeek(isoDate(start.subtract(const Duration(days: 7))));
-    return WeekBundle(start: start, days: days, suggestions: suggestions);
+    final sessions = [for (final day in days) ...day.sessions];
+    final weekEnd = start.add(const Duration(days: 6));
+    final goalRows = await _readGoals();
+    goals = goalRows;
+    return WeekBundle(
+      start: start,
+      days: days,
+      suggestions: suggestions,
+      balance: buildBalance(start: start, end: weekEnd, sessions: sessions),
+      goalLines: goalProgressLines(goalRows, sessions),
+    );
   }
 
   Future<Set<String>> markedDays(DateTime month) {
@@ -612,6 +657,7 @@ class Store extends ChangeNotifier {
         groups[id] = exercise.muscleGroups;
       }
     }
+    final bias = shapingBias(await _readGoals());
     final suggestions = suggestWeek(
       lifts: [
         for (final entry in grouped.entries)
@@ -627,6 +673,7 @@ class Store extends ChangeNotifier {
       context: WeekContext(
         meanReadiness: meanReadiness(scores.values.map((score) => score.readiness)),
         warnedMuscles: muscles,
+        bias: bias,
       ),
     );
     await db.delete(
@@ -656,12 +703,26 @@ class Store extends ChangeNotifier {
     );
   }
 
+  Future<ExportFiles> exportSession(Session session) {
+    final day = parseIsoDate(session.date);
+    return exportRange(
+      start: day,
+      end: day,
+      kind: 'workout',
+      sessionId: session.id,
+    );
+  }
+
   Future<ExportFiles> exportRange({
     required DateTime start,
     required DateTime end,
     required String kind,
+    int? sessionId,
   }) async {
     final sessions = await _sessionsBetween(isoDate(start), isoDate(end));
+    final exported = sessionId == null
+        ? sessions
+        : sessions.where((session) => session.id == sessionId).toList();
     final plans = await _plansBetween(isoDate(start), isoDate(end));
     final checkins = await _checkInsBetween(isoDate(start), isoDate(end));
     final warnings = await _warningsBetween(isoDate(start), isoDate(end));
@@ -679,12 +740,13 @@ class Store extends ChangeNotifier {
         kind: kind,
         start: start,
         end: end,
-        sessions: sessions,
+        sessions: exported,
         plans: plans,
         checkins: checkins,
         warnings: warnings,
         patterns: await patterns(),
         suggestions: suggestionRows.map(_suggestion).toList(),
+        goals: await _readGoals(),
         readinessByDay: {
           for (final entry in scores.entries) entry.key: entry.value.readiness,
         },
@@ -1068,6 +1130,24 @@ class Store extends ChangeNotifier {
           aliases: decodeStrings(row['aliases'] as String?),
           defaultLoadFactor: (row['default_load_factor'] as num).toDouble(),
           bodyweight: seededBodyweight(row['name'] as String),
+        ),
+    ];
+  }
+
+  Future<List<Goal>> _readGoals() async {
+    final rows = await db.query('goals', orderBy: 'id');
+    return [
+      for (final row in rows)
+        Goal(
+          id: row['id'] as int,
+          kind: goalKindFrom(row['kind'] as String),
+          general: row['general'] as String?,
+          exerciseId: row['exercise_id'] as int?,
+          exerciseName: exerciseById(row['exercise_id'] as int?)?.name,
+          targetKg: (row['target_kg'] as num?)?.toDouble(),
+          distanceKm: (row['distance_km'] as num?)?.toDouble(),
+          targetPaceS: row['target_pace_s'] as int?,
+          createdOn: row['created_on'] as String,
         ),
     ];
   }

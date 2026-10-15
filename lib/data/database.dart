@@ -5,7 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'exercise_seed.dart';
 
-const fitnessSchemaVersion = 2;
+const fitnessSchemaVersion = 3;
 
 Future<Database> openFitnessDatabase({String? path}) async {
   final resolved = path ?? p.join(await getDatabasesPath(), 'fitness.db');
@@ -147,6 +147,18 @@ Future<Database> openFitnessDatabase({String? path}) async {
           value TEXT NOT NULL
         )
       ''');
+      await db.execute('''
+        CREATE TABLE goals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          general TEXT,
+          exercise_id INTEGER,
+          target_kg REAL,
+          distance_km REAL,
+          target_pace_s INTEGER,
+          created_on TEXT NOT NULL
+        )
+      ''');
       final batch = db.batch();
       for (final exercise in seedExercises()) {
         batch.insert('exercises', {
@@ -213,6 +225,20 @@ Future<void> upgradeFitnessDatabase(
       'key': 'round_minutes',
       'value': '3',
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+  if (oldVersion < 3) {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS goals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        general TEXT,
+        exercise_id INTEGER,
+        target_kg REAL,
+        distance_km REAL,
+        target_pace_s INTEGER,
+        created_on TEXT NOT NULL
+      )
+    ''');
   }
 }
 

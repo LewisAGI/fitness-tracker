@@ -3,6 +3,30 @@ import 'normalise.dart';
 
 enum OverloadAction { progress, keep, hold, deload }
 
+/// How an active general goal changes the rep range and the load step.
+/// [standard] is the default overload rule.
+enum TrainingBias { standard, strength, fitness, hypertrophy }
+
+TrainingBias biasFromGeneral(String? general) => switch (general) {
+  'strength' => TrainingBias.strength,
+  'fitness' => TrainingBias.fitness,
+  'hypertrophy' => TrainingBias.hypertrophy,
+  _ => TrainingBias.standard,
+};
+
+({int low, int high}) rangeForBias(TrainingBias bias) => switch (bias) {
+  TrainingBias.strength => (low: 3, high: 6),
+  TrainingBias.hypertrophy => (low: 6, high: 12),
+  _ => (low: 8, high: 12),
+};
+
+double stepKg(TrainingBias bias, {required bool lower}) {
+  if (bias == TrainingBias.strength) {
+    return lower ? 10 : 5;
+  }
+  return lower ? 5 : 2.5;
+}
+
 class WorkingSet {
   const WorkingSet({required this.weightKg, required this.reps, this.rir});
 
@@ -19,6 +43,7 @@ class LiftWeekInput {
     this.priorRepLow,
     this.priorRepHigh,
     this.exerciseId = 0,
+    this.bias,
   });
 
   final int exerciseId;
@@ -27,13 +52,21 @@ class LiftWeekInput {
   final List<WorkingSet> sets;
   final int? priorRepLow;
   final int? priorRepHigh;
+
+  /// Replaces the week bias for this lift when set.
+  final TrainingBias? bias;
 }
 
 class WeekContext {
-  const WeekContext({this.meanReadiness, this.warnedMuscles = const {}});
+  const WeekContext({
+    this.meanReadiness,
+    this.warnedMuscles = const {},
+    this.bias = TrainingBias.standard,
+  });
 
   final double? meanReadiness;
   final Set<String> warnedMuscles;
+  final TrainingBias bias;
 }
 
 class OverloadSuggestion {
@@ -90,10 +123,11 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
       .where((set) => (set.weightKg - workingWeight).abs() < 0.05)
       .toList();
   final reps = working.map((set) => set.reps).toList();
-  final target = _target(lift, reps);
+  final bias = lift.bias ?? context.bias;
+  final target = _target(lift, bias);
   final hitTop = working.every((set) => set.reps >= target.high);
   final lower = isLowerBody(lift.muscleGroups);
-  final increment = lower ? 5.0 : 2.5;
+  final increment = stepKg(bias, lower: lower);
   final lowReady =
       context.meanReadiness != null && context.meanReadiness! < 40;
   final warned = lift.muscleGroups.any(
@@ -158,11 +192,14 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   );
 }
 
-({int low, int high}) _target(LiftWeekInput lift, List<int> reps) {
+({int low, int high}) _target(LiftWeekInput lift, TrainingBias bias) {
+  if (bias != TrainingBias.standard) {
+    return rangeForBias(bias);
+  }
   if (lift.priorRepLow != null && lift.priorRepHigh != null) {
     return (low: lift.priorRepLow!, high: lift.priorRepHigh!);
   }
-  return (low: 8, high: 12);
+  return rangeForBias(TrainingBias.standard);
 }
 
 /// Nearest 2.5 kg, applied to the final suggestion. An exact halfway step rounds down.

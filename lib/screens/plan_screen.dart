@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../data/store.dart';
 import '../services/dates.dart';
+import '../services/share_export.dart';
 import '../theme/app_theme.dart';
+import '../widgets/balance_card.dart';
 import '../widgets/confirm_action.dart';
 import '../widgets/icon_tip.dart';
 import '../widgets/weekly_cards.dart';
@@ -45,13 +47,29 @@ class _PlanScreenState extends State<PlanScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(week == null ? 'Plan' : fmtRange(week.start, week.start.add(const Duration(days: 6)))),
+        actions: [
+          IconTip(
+            icon: Icons.ios_share,
+            message: 'Export week',
+            onPressed: () {
+              final current = _week;
+              if (current != null) {
+                _export(current);
+              }
+            },
+          ),
+        ],
       ),
       body: week == null
           ? const SizedBox.shrink()
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
               children: [
-                WeeklyCards(suggestions: week.suggestions),
+                BalanceCard(report: week.balance),
+                WeeklyCards(
+                  suggestions: week.suggestions,
+                  goalLines: week.goalLines,
+                ),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 280,
@@ -66,6 +84,18 @@ class _PlanScreenState extends State<PlanScreen> {
               ],
             ),
     );
+  }
+
+  Future<void> _export(WeekBundle week) async {
+    final files = await widget.store.exportRange(
+      start: week.start,
+      end: week.start.add(const Duration(days: 6)),
+      kind: 'week',
+    );
+    if (!mounted) {
+      return;
+    }
+    await offerExport(context, files);
   }
 
   Widget _dayColumn(DayBundle day) {
