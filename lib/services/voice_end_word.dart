@@ -1,7 +1,15 @@
 /// End of a voice log: "done", "I'm done", "all done", "that's it", "finished".
 class VoiceEndWord {
+  /// Optional "all" / "I'm" / "I am" prefixes, repeated, so they are stripped
+  /// with the cue and do not stay in the transcript.
+  static const _prefix = r"(?:(?:\b(?:all|i'm|im|i\s+am)\b\s+)*)";
+
   static final _cue = RegExp(
-    r"""(?:\b(?:that's|thats)\s+it\b|\bfinished\b|(?:\b(?:i'm|i am|im)\s+)?\bdone\b)[\s.!?]*$""",
+    '(?:'
+    "$_prefix(?:that's|thats)\\s+it|"
+    '${_prefix}finished|'
+    '${_prefix}done'
+    r')[\s.!?]*$',
     caseSensitive: false,
   );
 
@@ -48,23 +56,63 @@ class VoiceEndWord {
     return collapsed.replaceRange(match.start, match.end, '').trim();
   }
 
+  /// A negation blocks only when it sits directly on the cue, with at most
+  /// one "quite" or "yet" between. A number or a unit stops the look.
   static bool _blocked(String text, int cueStart) {
     final prior = text.substring(0, cueStart).trim();
     if (prior.isEmpty) {
       return false;
     }
     final words = prior.split(RegExp(r'\s+'));
-    final start = words.length > 3 ? words.length - 3 : 0;
-    for (var i = start; i < words.length; i++) {
-      final word = words[i].replaceAll(RegExp(r"[^a-z']"), '');
-      if (word == "i'm" || word == 'im' || word == 'i' || word == 'am' || word == 'all') {
-        continue;
-      }
-      if (_endNegation(word)) {
-        return true;
-      }
+    final last = _token(words.last);
+    if (_numberOrUnit(last)) {
+      return false;
     }
-    return false;
+    if (last == 'quite' || last == 'yet') {
+      if (words.length < 2) {
+        return false;
+      }
+      final before = _token(words[words.length - 2]);
+      if (_numberOrUnit(before)) {
+        return false;
+      }
+      return _endNegation(before);
+    }
+    return _endNegation(last);
+  }
+
+  static String _token(String raw) => raw.replaceAll(RegExp(r"[^a-z0-9']"), '');
+
+  static bool _numberOrUnit(String token) {
+    if (RegExp(r'^\d').hasMatch(token)) {
+      return true;
+    }
+    const units = {
+      'kg',
+      'k',
+      'kilo',
+      'kilos',
+      'kilogram',
+      'kilograms',
+      'lb',
+      'lbs',
+      'pound',
+      'pounds',
+      'km',
+      'kilometre',
+      'kilometres',
+      'kilometer',
+      'kilometers',
+      'rep',
+      'reps',
+      'set',
+      'sets',
+      'min',
+      'mins',
+      'minute',
+      'minutes',
+    };
+    return units.contains(token);
   }
 
   static bool _endNegation(String word) {

@@ -23,6 +23,10 @@ void main() {
     expect(VoiceEndWord.endsLog("I'm done"), isTrue);
     expect(VoiceEndWord.strip("Bench press I'm done"), 'Bench press');
     expect(VoiceEndWord.strip('Squats done.'), 'Squats');
+    expect(VoiceEndWord.strip('Bench all done'), 'Bench');
+    expect(VoiceEndWord.strip("Bench I'm finished"), 'Bench');
+    expect(VoiceEndWord.strip("Bench I am that's it"), 'Bench');
+    expect(VoiceEndWord.strip("I'm all done"), '');
   });
 
   test('saying done stops listening and opens confirm without the word', () {
@@ -90,6 +94,10 @@ void main() {
     expect(VoiceEndWord.endsLog('finished the pads'), isFalse);
     expect(VoiceEndWord.strip("Bench Press that's it"), 'Bench Press');
     expect(VoiceEndWord.strip('Squats finished'), 'Squats');
+    expect(VoiceEndWord.endsLog('not done'), isFalse);
+    expect(VoiceEndWord.endsLog('not quite done'), isFalse);
+    expect(VoiceEndWord.endsLog('not yet finished'), isFalse);
+    expect(VoiceEndWord.strip('not yet finished'), 'not yet finished');
 
     final confirms = <String>[];
     var stops = 0;

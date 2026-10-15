@@ -261,6 +261,16 @@ void main() {
     await _showConfirm(
       tester,
       store,
+      parser.parse('bench 3x8 at 20 kg'),
+      autoSave: false,
+    );
+    expect(find.byTooltip('Bar'), findsOneWidget);
+    await tester.tap(find.byTooltip('Discard'));
+    await _settle(tester);
+
+    await _showConfirm(
+      tester,
+      store,
       parser.parse('muay thai sparring'),
       autoSave: false,
     );

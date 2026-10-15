@@ -113,14 +113,28 @@ String _corrections(String text) {
     final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
     var before = current.substring(0, match.start);
     if (RegExp(r'^\d+x\d+\b').hasMatch(rest)) {
-      before = before.replaceFirst(scheme, '');
+      final weight = RegExp(
+        r'\s*(?:\bat\s+\d+(?:\.\d+)?(?:\s*(?:kg|k|kilos?|pounds?|lbs?|lb))?|\d+(?:\.\d+)?\s*(?:kg|k|kilos?|pounds?|lbs?|lb))\s*$',
+      ).firstMatch(before);
+      var keptWeight = '';
+      if (weight != null) {
+        keptWeight = before.substring(weight.start).trim();
+        before = before.substring(0, weight.start);
+      }
+      before = '${before.replaceFirst(scheme, '').trim()} $keptWeight'.trim();
     } else if (RegExp(r'^[a-z]').hasMatch(token)) {
       final tail = scheme.firstMatch(before);
       final head = tail == null ? before : before.substring(0, tail.start);
       final kept = tail == null ? '' : before.substring(tail.start);
       before = '${head.replaceFirst(name, '').trim()} ${kept.trim()}'.trim();
     } else {
+      final removed = RegExp(r'(\S+)\s*$').firstMatch(before)?.group(1) ?? '';
       before = before.replaceFirst(RegExp(r'\S+\s*$'), '');
+      if (RegExp(
+        r'^(?:kg|k|kilos?|kilograms?|pounds?|lbs?|lb)$',
+      ).hasMatch(removed)) {
+        before = before.replaceFirst(RegExp(r'\d+(?:\.\d+)?\s*$'), '');
+      }
     }
     current = '${before.trim()} ${rest.trim()}'.trim();
   }
@@ -190,39 +204,117 @@ _ReadInt? _readInteger(List<String> tokens, int start) {
   if (first == null) {
     return null;
   }
+  if ((first.word == 'a' || first.word == 'an') && start + 1 < tokens.length) {
+    final hundred = _splitWord(tokens[start + 1]);
+    if (hundred != null && hundred.word == 'hundred') {
+      return _finishHundred(tokens, start, 100, hundred.suffix);
+    }
+  }
   final ones = _ones[first.word];
   if (ones != null && ones >= 1 && ones <= 9 && start + 1 < tokens.length) {
     final hundred = _splitWord(tokens[start + 1]);
     if (hundred != null && hundred.word == 'hundred') {
-      var value = ones * 100;
-      var consumed = 2;
-      var suffix = hundred.suffix;
-      var cursor = start + 2;
-      if (cursor < tokens.length) {
-        final and = _splitWord(tokens[cursor]);
-        if (and != null && and.word == 'and' && and.suffix.isEmpty) {
-          final afterAnd = _readUnderHundred(tokens, cursor + 1);
-          if (afterAnd != null) {
-            cursor += 1;
-            value += afterAnd.value;
-            return _ReadInt(
-              value,
-              (cursor - start) + afterAnd.consumed,
-              afterAnd.suffix,
-            );
-          }
-        }
-      }
-      final rest = _readUnderHundred(tokens, cursor);
-      if (rest != null) {
-        value += rest.value;
-        consumed = (cursor - start) + rest.consumed;
-        suffix = rest.suffix;
-      }
-      return _ReadInt(value, consumed, suffix);
+      return _finishHundred(tokens, start, ones * 100, hundred.suffix);
     }
   }
+  final plate = _readPlate(tokens, start);
+  if (plate != null) {
+    return plate;
+  }
   return _readUnderHundred(tokens, start);
+}
+
+/// "a hundred" / "two hundred" plus an optional remainder under 100.
+_ReadInt _finishHundred(List<String> tokens, int start, int hundreds, String hundredSuffix) {
+  var value = hundreds;
+  var consumed = 2;
+  var suffix = hundredSuffix;
+  var cursor = start + 2;
+  if (cursor < tokens.length) {
+    final and = _splitWord(tokens[cursor]);
+    if (and != null && and.word == 'and' && and.suffix.isEmpty) {
+      final afterAnd = _readUnderHundred(tokens, cursor + 1);
+      if (afterAnd != null) {
+        cursor += 1;
+        value += afterAnd.value;
+        return _ReadInt(
+          value,
+          (cursor - start) + afterAnd.consumed,
+          afterAnd.suffix,
+        );
+      }
+    }
+  }
+  final rest = _readUnderHundred(tokens, cursor);
+  if (rest != null) {
+    value += rest.value;
+    consumed = (cursor - start) + rest.consumed;
+    suffix = rest.suffix;
+  }
+  return _ReadInt(value, consumed, suffix);
+}
+
+const _weightUnits = {
+  'kg',
+  'kgs',
+  'k',
+  'kilo',
+  'kilos',
+  'kilogram',
+  'kilograms',
+  'pound',
+  'pounds',
+  'lb',
+  'lbs',
+  'point',
+};
+
+bool _weightContext(List<String> tokens, int start) {
+  if (start > 0) {
+    final previous = _splitWord(tokens[start - 1])?.word;
+    if (previous == 'at') {
+      return true;
+    }
+  }
+  for (var i = start; i < tokens.length && i < start + 8; i++) {
+    final word = _splitWord(tokens[i])?.word;
+    if (word != null && _weightUnits.contains(word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Plate speech: "one oh two" is 102, "two twenty" is 220. Only in a weight.
+_ReadInt? _readPlate(List<String> tokens, int start) {
+  if (!_weightContext(tokens, start)) {
+    return null;
+  }
+  final first = _splitWord(tokens[start]);
+  if (first == null) {
+    return null;
+  }
+  final lead = _ones[first.word];
+  if (lead == null || lead < 1 || lead > 9) {
+    return null;
+  }
+  if (start + 2 < tokens.length) {
+    final mid = _splitWord(tokens[start + 1]);
+    final last = _splitWord(tokens[start + 2]);
+    if (mid != null &&
+        mid.word == 'oh' &&
+        mid.suffix.isEmpty &&
+        last != null &&
+        _ones.containsKey(last.word) &&
+        _ones[last.word]! <= 9) {
+      return _ReadInt(lead * 100 + _ones[last.word]!, 3, last.suffix);
+    }
+  }
+  final rest = _readUnderHundred(tokens, start + 1);
+  if (rest != null && rest.value >= 10 && rest.value < 100) {
+    return _ReadInt(lead * 100 + rest.value, 1 + rest.consumed, rest.suffix);
+  }
+  return null;
 }
 
 _ReadInt? _readUnderHundred(List<String> tokens, int start) {

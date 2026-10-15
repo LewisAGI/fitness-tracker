@@ -1,4 +1,5 @@
 import 'package:fitness_tracker/models/training.dart';
+import 'package:fitness_tracker/services/voice_end_word.dart';
 import 'package:fitness_tracker/services/voice_parser.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -34,6 +35,9 @@ void main() {
     final barely = setOf('bench 3x8 at 80 barely even that easy');
     expect(barely.rir, isNull);
     expect(barely.rirFlagged, isTrue);
+    final fourBack = setOf("bench 3x8 at 80 wasn't really all that easy");
+    expect(fourBack.rir, isNull);
+    expect(fourBack.rirFlagged, isTrue);
   });
 
   test('decimals round down so a fraction cannot step up', () {
@@ -96,6 +100,16 @@ void main() {
     expect(spoken.sets, 3);
     expect(spoken.reps, 10);
     expect(spoken.weightKg, 60);
+
+    final weight = setOf('bench 3x8 at 80 kg I mean 70');
+    expect(weight.sets, 3);
+    expect(weight.reps, 8);
+    expect(weight.weightKg, 70);
+
+    final schemeKeepsLoad = setOf('bench 4 sets of 8 at 60 I mean 3x10');
+    expect(schemeKeepsLoad.sets, 3);
+    expect(schemeKeepsLoad.reps, 10);
+    expect(schemeKeepsLoad.weightKg, 60);
   });
 
   test('6 rounds of 2 min is 12 minutes', () {
@@ -141,6 +155,86 @@ void main() {
     expect(bench.map((set) => set.rir), [0, null, null]);
     final row = (await store.loadDay(DateTime(2026, 10, 13))).sessions.single.sets;
     expect(row.map((set) => set.rir), [null, 0, null]);
+  });
+
+  test('a negation on the log does not block a trailing end phrase', () {
+    final parser = VoiceParser.seeded();
+    final phrases = <String, void Function(ParsedSet set)>{
+      'deadlift 5x5 at 140 no wait 150 done': (set) {
+        expect(set.exerciseName, 'Deadlift');
+        expect(set.sets, 5);
+        expect(set.reps, 5);
+        expect(set.weightKg, 150);
+      },
+      'bench 3x8 not to failure done': (set) {
+        expect(set.exerciseName, 'Bench press');
+        expect(set.sets, 3);
+        expect(set.reps, 8);
+        expect(set.rir, isNull);
+        expect(set.rirFlagged, isTrue);
+      },
+      "bench 3x8 didn't fail done": (set) {
+        expect(set.exerciseName, 'Bench press');
+        expect(set.sets, 3);
+        expect(set.reps, 8);
+        expect(set.rir, isNull);
+      },
+      'rows 3x10 no straps done': (set) {
+        expect(set.exerciseName, 'Barbell row');
+        expect(set.sets, 3);
+        expect(set.reps, 10);
+      },
+      'squats 5 by 5 not easy finished': (set) {
+        expect(set.exerciseName, 'Back squat');
+        expect(set.sets, 5);
+        expect(set.reps, 5);
+        expect(set.rir, isNull);
+        expect(set.rirFlagged, isTrue);
+      },
+    };
+    for (final entry in phrases.entries) {
+      expect(VoiceEndWord.endsLog(entry.key), isTrue, reason: entry.key);
+      entry.value(parser.parse(entry.key).sessions.single.sets.single);
+    }
+    expect(VoiceEndWord.endsLog('not done'), isFalse);
+    expect(VoiceEndWord.endsLog('not quite done'), isFalse);
+    expect(VoiceEndWord.endsLog('not yet finished'), isFalse);
+  });
+
+  test('a hundred and a half, oh, and two twenty are plate weights', () {
+    expect(
+      setOf('bench a hundred and forty two and a half kilos').weightKg,
+      142.5,
+    );
+    expect(setOf('bench one oh two point five kilos').weightKg, 102.5);
+    expect(setOf('deadlift two twenty kilos').weightKg, 220);
+    expect(setOf('bench at two twenty').weightKg, 220);
+  });
+
+  test('a barbell under 25 kg is flagged', () {
+    expect(setOf('bench 3x8 at 20 kg').lightBar, isTrue);
+    expect(setOf('deadlift 3x5 at 22.5 kg').lightBar, isTrue);
+    expect(setOf('bench 3x8 at 25 kg').lightBar, isFalse);
+    expect(setOf('curl 3x8 at 12 kg').lightBar, isFalse);
+    expect(setOf('bench 3x8 at 80 kg').lightBar, isFalse);
+  });
+
+  test('a set number past the entry is flagged and not stored on the last set', () async {
+    final fifth = setOf('bench 3x8 failed on set 5');
+    expect(fifth.rir, 0);
+    expect(fifth.rirSetIndex, 4);
+    expect(fifth.rirFlagged, isTrue);
+    expect(fifth.rirLastOnly, isFalse);
+    final fourth = setOf('bench 3x8 failed on the fourth set');
+    expect(fourth.rirSetIndex, 3);
+    expect(fourth.rirFlagged, isTrue);
+
+    final store = await openStore();
+    await store.saveParse(parser.parse('bench 3x8 failed on set 5'));
+    final sets = (await store.loadDay(DateTime(2026, 10, 12))).sessions.single.sets;
+    expect(sets, hasLength(1));
+    expect(sets.single.setCount, 3);
+    expect(sets.single.rir, isNull);
   });
 
   test('the saved transcript keeps its original case', () async {

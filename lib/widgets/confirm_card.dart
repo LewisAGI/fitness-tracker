@@ -221,6 +221,11 @@ class _ConfirmCardState extends State<ConfirmCard> {
               message: 'RIR',
               child: Icon(Icons.flag, color: AppColors.accent, size: 18),
             ),
+          if (set.lightBar)
+            const Tooltip(
+              message: 'Bar',
+              child: Icon(Icons.flag, color: AppColors.accent, size: 18),
+            ),
         ],
       ),
     );

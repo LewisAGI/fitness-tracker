@@ -68,6 +68,7 @@ class ParsedSet {
     this.rirLastOnly = false,
     this.rirFlagged = false,
     this.rirSetIndex,
+    this.lightBar = false,
   });
 
   int? exerciseId;
@@ -84,6 +85,7 @@ class ParsedSet {
   bool rirLastOnly;
   bool rirFlagged;
   int? rirSetIndex;
+  bool lightBar;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -388,6 +390,9 @@ class VoiceParser {
     }
 
     final heard = liftRir(text);
+    final named = heard.setIndex;
+    final outOfRange =
+        named != null && slots.sets != null && named >= slots.sets!;
     return ParsedSession(
       type: 'gym',
       raw: text,
@@ -404,9 +409,14 @@ class VoiceParser {
           muscleGroups: exercise?.muscleGroups ?? const [],
           category: exercise?.category,
           rir: heard.value,
-          rirLastOnly: heard.lastOnly,
-          rirFlagged: heard.flagged,
-          rirSetIndex: heard.setIndex,
+          rirLastOnly: outOfRange ? false : heard.lastOnly,
+          rirFlagged: heard.flagged || outOfRange,
+          rirSetIndex: named,
+          lightBar: _lightBarbell(
+            exercise?.name,
+            slots.weightKg,
+            slots.bodyweight,
+          ),
         ),
       ],
     );
@@ -1296,10 +1306,11 @@ class LiftRir {
 ///
 /// Decimals round down (`1.5` → `1`; RPE `8.5` is `10 - 8.5` = `1.5` → `1`) so a fraction
 /// never becomes a step-up. RIR outside 0–5, and RPE outside 5–10, come back null and flagged.
-/// A negation within the three words before a phrase is also null and flagged. That includes
+/// A negation within the four words before a phrase is also null and flagged. That includes
 /// `not`, `hardly`, `barely`, and any word ending in n't (`wasn't`, `didn't`, `isn't`, `wasnt`).
 /// Failure with no set number applies to the last set. `failed on the first set` and
-/// `failed on set 2` apply to that set.
+/// `failed on set 2` apply to that set. A set number past the logged sets stays flagged
+/// and is not moved onto the last set.
 LiftRir liftRir(String text) {
   final explicit = RegExp(r'\brir\s+(\d+(?:\.\d+)?)\b').firstMatch(text);
   if (explicit != null) {
@@ -1356,6 +1367,19 @@ LiftRir _acceptRir(double raw) {
   return LiftRir(value: rounded);
 }
 
+const _ordinalSet = {
+  'first': 0,
+  'second': 1,
+  'third': 2,
+  'fourth': 3,
+  'fifth': 4,
+  'sixth': 5,
+  'seventh': 6,
+  'eighth': 7,
+  'ninth': 8,
+  'tenth': 9,
+};
+
 int? _namedSet(String text) {
   final numbered = RegExp(r'\bon\s+(?:the\s+)?set\s+(\d+)\b').firstMatch(text);
   if (numbered != null) {
@@ -1364,16 +1388,40 @@ int? _namedSet(String text) {
       return number - 1;
     }
   }
-  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?first\s+set\b').hasMatch(text)) {
-    return 0;
-  }
-  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?second\s+set\b').hasMatch(text)) {
-    return 1;
-  }
-  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?third\s+set\b').hasMatch(text)) {
-    return 2;
+  final ordinal = RegExp(
+    r'\b(?:on\s+)?(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s+set\b',
+  ).firstMatch(text);
+  if (ordinal != null) {
+    return _ordinalSet[ordinal.group(1)];
   }
   return null;
+}
+
+const _barbellLifts = {
+  'Bench press',
+  'Incline bench press',
+  'Close-grip bench press',
+  'Overhead press',
+  'Back squat',
+  'Front squat',
+  'Deadlift',
+  'Sumo deadlift',
+  'Romanian deadlift',
+  'Rack pull',
+  'Good morning',
+  'Barbell row',
+  'Pendlay row',
+  'Hip thrust',
+  'Power clean',
+  'Hang clean',
+  'Snatch',
+};
+
+bool _lightBarbell(String? name, double? weightKg, bool bodyweight) {
+  if (name == null || weightKg == null || bodyweight) {
+    return false;
+  }
+  return weightKg < 25 && _barbellLifts.contains(name);
 }
 
 bool _rirNegated(String text, int index) {
@@ -1382,7 +1430,7 @@ bool _rirNegated(String text, int index) {
     return false;
   }
   final words = prior.split(RegExp(r'\s+'));
-  final start = words.length > 3 ? words.length - 3 : 0;
+  final start = words.length > 4 ? words.length - 4 : 0;
   for (var i = start; i < words.length; i++) {
     final word = words[i].replaceAll(RegExp(r"[^a-z']"), '');
     if (_rirNegationWord(word)) {
