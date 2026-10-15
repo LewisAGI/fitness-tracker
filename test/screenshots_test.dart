@@ -7,21 +7,32 @@ import 'package:fitness_tracker/services/checkin_scheduler.dart';
 import 'package:fitness_tracker/services/speech_capture.dart';
 import 'package:fitness_tracker/services/voice_parser.dart';
 import 'package:fitness_tracker/widgets/confirm_card.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../tool/screenshot_fonts.dart';
 import 'screens_test.dart' show RecordingNotifications;
 import 'support/harness.dart';
+
+const _logicalWidth = 390.0;
+const _logicalHeight = 844.0;
+const _pixelRatio = 3.0;
 
 void main() {
   LiveTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('screenshots of the main screens', (tester) async {
+    await loadAppFonts();
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+
     final store = await openStore();
     await seedDemo(store);
     final boundary = GlobalKey();
-    await tester.binding.setSurfaceSize(const Size(390, 844));
+    tester.view.devicePixelRatio = _pixelRatio;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.binding.setSurfaceSize(const Size(_logicalWidth, _logicalHeight));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
@@ -81,6 +92,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tab-History')));
     await tester.pumpAndSettle();
     await _shoot(tester, boundary, 'history');
+
+    await tester.tap(find.byKey(const ValueKey('tab-Insights')));
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'insights');
+    debugDefaultTargetPlatformOverride = null;
   });
 }
 
@@ -104,11 +120,17 @@ Future<void> _shoot(WidgetTester tester, GlobalKey boundary, String name) async 
   final object = tester.renderObject<RenderRepaintBoundary>(find.byKey(boundary));
   final image = (object.debugLayer! as OffsetLayer).toImageSync(
     object.paintBounds,
-    pixelRatio: 2,
+    pixelRatio: _pixelRatio,
   );
+  expect(image.width, _logicalWidth * _pixelRatio);
+  expect(image.height, _logicalHeight * _pixelRatio);
   final data = await image.toByteData(format: ui.ImageByteFormat.png);
   image.dispose();
-  final file = File('/opt/cursor/artifacts/screenshots/$name.png');
+  final directory = Platform.environment['SCREENSHOT_DIR'] ??
+      (Directory('/opt/cursor/artifacts').existsSync()
+          ? '/opt/cursor/artifacts/screenshots'
+          : 'build/screenshots');
+  final file = File('$directory/$name.png');
   await file.parent.create(recursive: true);
   await file.writeAsBytes(data!.buffer.asUint8List());
 }
