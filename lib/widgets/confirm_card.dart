@@ -44,10 +44,22 @@ bool confirmNeedsReview(ParseResult result) {
 }
 
 bool _emptyStrength(ParsedSet set) {
+  final timedHold = set.bodyweight && _hasDuration(set.notes);
   return set.category == 'strength' &&
       set.sets == null &&
       set.reps == null &&
-      set.weightKg == null;
+      set.weightKg == null &&
+      !set.explicitBodyweight &&
+      !timedHold;
+}
+
+bool _hasDuration(String? notes) {
+  if (notes == null || notes.isEmpty) {
+    return false;
+  }
+  return RegExp(
+    r'\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\b',
+  ).hasMatch(notes);
 }
 
 class ConfirmCard extends StatefulWidget {

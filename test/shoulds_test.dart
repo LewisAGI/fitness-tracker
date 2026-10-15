@@ -1,7 +1,10 @@
 import 'package:fitness_tracker/data/exercise_seed.dart';
 import 'package:fitness_tracker/services/voice_parser.dart';
 import 'package:fitness_tracker/widgets/confirm_card.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/harness.dart';
 
 void main() {
   final parser = VoiceParser.seeded();
@@ -99,7 +102,7 @@ void main() {
     expect(set.weightKg, isNull);
     expect(set.ambiguous, isFalse);
     expect(set.summary, 'Bench press · 3×8');
-    expect(bench.sessions.single.notes, '60 seconds rest');
+    expect(bench.sessions.single.notes, contains('bench: 60 seconds rest'));
     expect(set.summary, isNot(contains('60 kg')));
 
     final rest = parser.parse('90 second rest');
@@ -238,14 +241,14 @@ void main() {
     expect(atSet.sets, 3);
     expect(atSet.reps, 8);
     expect(atSet.weightKg, 60);
-    expect(at.sessions.single.notes, 'rest 90');
+    expect(at.sessions.single.notes, contains('bench: rest 90'));
     expect(atSet.summary, 'Bench press · 3×8 · 60 kg');
     expect(confirmNeedsReview(at), isFalse);
 
     final bare = parser.parse('bench 3x8 60 rest 90');
     final bareSet = bare.sessions.single.sets.single;
     expect(bareSet.weightKg, 60);
-    expect(bare.sessions.single.notes, 'rest 90');
+    expect(bare.sessions.single.notes, contains('bench: rest 90'));
     expect(bareSet.summary, 'Bench press · 3×8 · 60 kg');
     expect(confirmNeedsReview(bare), isFalse);
   });
@@ -256,14 +259,14 @@ void main() {
     expect(squatSet.sets, 5);
     expect(squatSet.reps, 5);
     expect(squatSet.weightKg, 100);
-    expect(squat.sessions.single.notes, '2 minutes rest');
+    expect(squat.sessions.single.notes, contains('squat: 2 minutes rest'));
     expect(squatSet.summary, 'Back squat · 5×5 · 100 kg');
     expect(confirmNeedsReview(squat), isFalse);
 
     final bench = parser.parse('bench 3x8 at 60 2 minutes rest');
     expect(bench.sessions.single.type, 'gym');
     expect(bench.sessions.single.sets.single.weightKg, 60);
-    expect(bench.sessions.single.notes, '2 minutes rest');
+    expect(bench.sessions.single.notes, contains('bench: 2 minutes rest'));
     expect(bench.sessions.single.sets.single.summary, 'Bench press · 3×8 · 60 kg');
     expect(confirmNeedsReview(bench), isFalse);
   });
@@ -276,7 +279,7 @@ void main() {
     expect(set.sets, 5);
     expect(set.reps, 5);
     expect(set.weightKg, 140);
-    expect(plate.sessions.single.notes, '2 minutes rest');
+    expect(plate.sessions.single.notes, contains('squat: 2 minutes rest'));
     expect(set.summary, 'Back squat · 5×5 · 140 kg');
     expect(confirmNeedsReview(plate), isFalse);
 
@@ -297,7 +300,7 @@ void main() {
     expect(set.sets, 3);
     expect(set.reps, 8);
     expect(set.weightKg, 60);
-    expect(parsed.sessions.single.notes, 'rest 2 minutes');
+    expect(parsed.sessions.single.notes, contains('bench: rest 2 minutes'));
     expect(confirmNeedsReview(parsed), isFalse);
   });
 
@@ -377,7 +380,7 @@ void main() {
     expect(benchSet.sets, 3);
     expect(benchSet.reps, 8);
     expect(benchSet.weightKg, 60);
-    expect(bench.sessions.single.notes, 'rest 2');
+    expect(bench.sessions.single.notes, contains('bench: rest 2'));
     expect(confirmNeedsReview(bench), isFalse);
 
     final squat = parser.parse('rest 3 minutes then squat 5x5 100');
@@ -388,7 +391,7 @@ void main() {
     expect(squatSet.sets, 5);
     expect(squatSet.reps, 5);
     expect(squatSet.weightKg, 100);
-    expect(squat.sessions.single.notes, 'rest 3 minutes');
+    expect(squat.sessions.single.notes, contains('squat: rest 3 minutes'));
     expect(confirmNeedsReview(squat), isFalse);
   });
 
@@ -454,7 +457,7 @@ void main() {
     expect(set.sets, 3);
     expect(set.reps, 8);
     expect(set.weightKg, 60);
-    expect(parsed.sessions.single.notes, 'rest 90 seconds');
+    expect(parsed.sessions.single.notes, contains('bench: rest 90 seconds'));
     expect(set.summary, isNot(contains('30 kg')));
     expect(confirmNeedsReview(parsed), isFalse);
   });
@@ -498,7 +501,7 @@ void main() {
     expect(sets[1].exerciseName, 'Back squat');
     expect(sets[1].weightKg, 100);
     expect(sets[1].notes, isNull);
-    expect(parsed.sessions.single.notes, 'rest 2');
+    expect(parsed.sessions.single.notes, contains('bench: rest 2'));
   });
 
   test('a rest before a non-gym session is kept', () {
@@ -514,7 +517,7 @@ void main() {
     final bench = between.sessions.first.sets.single;
     expect(bench.weightKg, 60);
     expect(bench.notes, 'rest 2');
-    expect(between.sessions.first.notes, 'rest 2');
+    expect(between.sessions.first.notes, contains('bench: rest 2'));
     expect(between.sessions.last.distanceKm, 5);
     expect(between.sessions.last.notes, isNull);
   });
@@ -529,5 +532,104 @@ void main() {
     expect(seconds.sessions.single.notes, 'rest 1');
     expect(seconds.sessions.single.notes, isNot(contains('135')));
     expect(seconds.sessions.single.sets, isNotEmpty);
+  });
+
+  test('a timed bodyweight hold and an explicit bodyweight are not empty', () {
+    final seconds = parser.parse('plank 60 seconds');
+    expect(seconds.sessions.single.sets.single.exerciseName, 'Plank');
+    expect(seconds.sessions.single.sets.single.bodyweight, isTrue);
+    expect(confirmNeedsReview(seconds), isFalse);
+
+    final timed = parser.parse('plank for 60 seconds');
+    expect(timed.sessions.single.sets.single.exerciseName, 'Plank');
+    expect(confirmNeedsReview(timed), isFalse);
+
+    final bare = parser.parse('pull ups');
+    expect(bare.sessions.single.sets.single.exerciseName, 'Pull-up');
+    expect(bare.sessions.single.sets.single.sets, isNull);
+    expect(bare.sessions.single.sets.single.reps, isNull);
+    expect(bare.sessions.single.sets.single.weightKg, isNull);
+    expect(confirmNeedsReview(bare), isTrue);
+
+    final named = parser.parse('squat bodyweight');
+    expect(named.sessions.single.sets.single.exerciseName, 'Back squat');
+    expect(named.sessions.single.sets.single.explicitBodyweight, isTrue);
+    expect(named.sessions.single.sets.single.weightKg, isNull);
+    expect(confirmNeedsReview(named), isFalse);
+  });
+
+  test('a trailing rest is named on the last set and read back', () async {
+    final parsed = parser.parse(
+      'bench 3x8 at 60 then squat 5x5 at 100 then rest 90',
+    );
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(sets.first.notes, isNull);
+    expect(sets.last.exerciseName, 'Back squat');
+    expect(sets.last.notes, 'rest 90');
+    expect(parsed.sessions.single.notes, contains('squat: rest 90'));
+    expect(parsed.sessions.single.notes, isNot(contains('bench: rest 90')));
+
+    final store = await openStore();
+    await store.saveParse(parsed);
+    final day = await store.loadDay(DateTime(2026, 10, 12));
+    expect(day.sessions.single.notes, contains('squat: rest 90'));
+  });
+
+  test('reps alone do not make a strength set empty', () {
+    final result = ParseResult(
+      normalised: 'bench 8 reps',
+      plans: const [],
+      sessions: [
+        ParsedSession(
+          type: 'gym',
+          sets: [
+            ParsedSet(
+              exerciseName: 'Bench press',
+              category: 'strength',
+              reps: 8,
+            ),
+          ],
+        ),
+      ],
+    );
+    expect(confirmNeedsReview(result), isFalse);
+  });
+
+  test('a rest before a run is its own held card', () {
+    final parsed = parser.parse('rest 2 then ran 5k');
+    expect(parsed.sessions, hasLength(2));
+    expect(parsed.sessions.first.type, 'other');
+    expect(parsed.sessions.first.sets, isEmpty);
+    expect(parsed.sessions.first.notes, 'rest 2');
+    expect(parsed.sessions.first.summary, 'Other · ?');
+    expect(parsed.sessions.last.type, 'run');
+    expect(parsed.sessions.last.notes, isNull);
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a rest after a run stays on that session', () {
+    final parsed = parser.parse('ran 5k then rest 2');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'run');
+    expect(parsed.sessions.single.distanceKm, 5);
+    expect(parsed.sessions.single.notes, 'rest 2');
+    expect(parsed.sessions.single.sets, isEmpty);
+  });
+
+  testWidgets('the confirm card shows which lift a rest belongs to', (tester) async {
+    final parsed = parser.parse('bench 3x8 at 60 rest 90');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ConfirmCard(
+          result: parsed,
+          exercises: seedExercises(),
+          onSave: (_) async {},
+          onAlias: (_, _) async {},
+          autoSaveAfter: null,
+        ),
+      ),
+    );
+    expect(find.textContaining('bench: rest 90'), findsOneWidget);
   });
 }

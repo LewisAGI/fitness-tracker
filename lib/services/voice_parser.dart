@@ -73,6 +73,7 @@ class ParsedSet {
     this.loadFlagged = false,
     this.heavy = false,
     this.rejected = false,
+    this.explicitBodyweight = false,
     this.notes,
   });
 
@@ -95,6 +96,7 @@ class ParsedSet {
   bool loadFlagged;
   bool heavy;
   bool rejected;
+  bool explicitBodyweight;
   String? notes;
 
   String get summary {
@@ -325,6 +327,7 @@ class VoiceParser {
     }
     final sessions = _mergeGym(_attachRestOnly(parsed));
     for (final session in sessions) {
+      _publishSetRestNotes(session);
       session.raw = spoken;
     }
     return ParseResult(
@@ -511,6 +514,7 @@ class VoiceParser {
           loadFlagged: stolen || (stray ? false : load.flagged),
           heavy: load.weightKg != null && load.weightKg! > 300,
           rejected: rejected,
+          explicitBodyweight: RegExp(r'\b(?:body\s*weight|bw)\b').hasMatch(text),
           notes: liftNotes,
         ),
       ],
@@ -1618,11 +1622,50 @@ List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
     kept.add(item);
   }
   if (pending != null && kept.isNotEmpty) {
-    _giveRestNote(kept.last, pending, leading: false);
+    _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
   } else if (pending != null) {
     kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
   }
   return kept;
+}
+
+/// A trailing rest follows the last lift, which may already be several
+/// gym entries. Merge that tail so the note lands on the last set.
+ParsedSession _collapseTrailingGym(List<ParsedSession> kept) {
+  var start = kept.length - 1;
+  while (start > 0 &&
+      kept[start].type == 'gym' &&
+      kept[start - 1].type == 'gym') {
+    start--;
+  }
+  if (start == kept.length - 1) {
+    return kept.last;
+  }
+  final merged = _mergeGym(kept.sublist(start)).single;
+  kept.removeRange(start, kept.length);
+  kept.add(merged);
+  return merged;
+}
+
+void _publishSetRestNotes(ParsedSession session) {
+  for (final set in session.sets) {
+    final note = set.notes;
+    final name = set.exerciseName;
+    if (note == null || note.isEmpty || name == null) {
+      continue;
+    }
+    if (!RegExp(r'\b(?:rest|rested|break)\b').hasMatch(note)) {
+      continue;
+    }
+    final label = set.spoken.trim().isEmpty
+        ? name.toLowerCase()
+        : set.spoken.trim().toLowerCase();
+    final line = '$label: $note';
+    if ((session.notes ?? '').contains(line)) {
+      continue;
+    }
+    session.notes = _joinNotes(session.notes, line);
+  }
 }
 
 void _giveRestNote(ParsedSession session, String note, {required bool leading}) {
