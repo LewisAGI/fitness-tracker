@@ -467,4 +467,67 @@ void main() {
     expect(set.reps, 5);
     expect(confirmNeedsReview(parsed), isTrue);
   });
+
+  test('an empty strength set waits for review', () {
+    for (final phrase in ['bench for 10 minutes', 'squat for 20 minutes', 'bench']) {
+      final parsed = parser.parse(phrase);
+      final set = parsed.sessions.single.sets.single;
+      expect(set.category, 'strength', reason: phrase);
+      expect(set.sets, isNull, reason: phrase);
+      expect(set.reps, isNull, reason: phrase);
+      expect(set.weightKg, isNull, reason: phrase);
+      expect(set.summary, isNot(contains('?')), reason: phrase);
+      expect(confirmNeedsReview(parsed), isTrue, reason: phrase);
+    }
+    final timed = parser.parse('bench for 10 minutes');
+    expect(timed.sessions.single.notes, 'for 10 minutes');
+    expect(timed.sessions.single.sets.single.exerciseName, 'Bench press');
+    final squat = parser.parse('squat for 20 minutes');
+    expect(squat.sessions.single.notes, 'for 20 minutes');
+    expect(squat.sessions.single.sets.single.exerciseName, 'Back squat');
+  });
+
+  test('a rest note is stored on the set it belongs to', () {
+    final parsed = parser.parse('rest 2 then bench 3x8 at 60 then squat 5x5 at 100');
+    expect(parsed.sessions, hasLength(1));
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(sets[0].exerciseName, 'Bench press');
+    expect(sets[0].weightKg, 60);
+    expect(sets[0].notes, 'rest 2');
+    expect(sets[1].exerciseName, 'Back squat');
+    expect(sets[1].weightKg, 100);
+    expect(sets[1].notes, isNull);
+    expect(parsed.sessions.single.notes, 'rest 2');
+  });
+
+  test('a rest before a non-gym session is kept', () {
+    final leading = parser.parse('rest 2 then ran 5k');
+    expect(leading.sessions.map((session) => session.type), ['other', 'run']);
+    expect(leading.sessions.first.notes, 'rest 2');
+    expect(leading.sessions.first.summary, contains('?'));
+    expect(leading.sessions.last.distanceKm, 5);
+    expect(confirmNeedsReview(leading), isTrue);
+
+    final between = parser.parse('bench 3x8 at 60 then rest 2 then ran 5k');
+    expect(between.sessions.map((session) => session.type), ['gym', 'run']);
+    final bench = between.sessions.first.sets.single;
+    expect(bench.weightKg, 60);
+    expect(bench.notes, 'rest 2');
+    expect(between.sessions.first.notes, 'rest 2');
+    expect(between.sessions.last.distanceKm, 5);
+    expect(between.sessions.last.notes, isNull);
+  });
+
+  test('clock rest rejects a minute or second outside range', () {
+    final minutes = parser.parse('rest 20 30');
+    expect(minutes.sessions.single.notes, 'rest 20');
+    expect(minutes.sessions.single.notes, isNot(contains('1230')));
+    expect(minutes.sessions.single.sets, isNotEmpty);
+
+    final seconds = parser.parse('rest 1 75');
+    expect(seconds.sessions.single.notes, 'rest 1');
+    expect(seconds.sessions.single.notes, isNot(contains('135')));
+    expect(seconds.sessions.single.sets, isNotEmpty);
+  });
 }

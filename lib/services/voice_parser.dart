@@ -73,6 +73,7 @@ class ParsedSet {
     this.loadFlagged = false,
     this.heavy = false,
     this.rejected = false,
+    this.notes,
   });
 
   int? exerciseId;
@@ -94,6 +95,7 @@ class ParsedSet {
   bool loadFlagged;
   bool heavy;
   bool rejected;
+  String? notes;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -341,7 +343,6 @@ class VoiceParser {
         type: 'other',
         notes: noted.notes,
         raw: original,
-        ambiguous: RegExp(r'\b(?:rest|rested|break)\b').hasMatch(original),
       );
     }
     text = noted.text;
@@ -510,6 +511,7 @@ class VoiceParser {
           loadFlagged: stolen || (stray ? false : load.flagged),
           heavy: load.weightKg != null && load.weightKg! > 300,
           rejected: rejected,
+          notes: liftNotes,
         ),
       ],
     );
@@ -1591,8 +1593,9 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     );
   }
 
-/// A rest-only piece is not its own session. It joins the neighbouring gym
-/// set, or stays as one held card when the utterance is only rest.
+/// A rest-only piece is not its own session. The note goes on the
+/// neighbouring set. A rest before a run or hike stays on that session,
+/// or as one held card when nothing precedes it.
 List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
   final kept = <ParsedSession>[];
   String? pending;
@@ -1602,19 +1605,35 @@ List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
       continue;
     }
     if (pending != null && item.type == 'gym') {
-      item.notes = _joinNotes(pending, item.notes);
+      _giveRestNote(item, pending, leading: true);
       pending = null;
-    } else {
+    } else if (pending != null) {
+      if (kept.isNotEmpty) {
+        _giveRestNote(kept.last, pending, leading: false);
+      } else {
+        kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
+      }
       pending = null;
     }
     kept.add(item);
   }
-  if (pending != null && kept.isNotEmpty && kept.last.type == 'gym') {
-    kept.last.notes = _joinNotes(kept.last.notes, pending);
-  } else if (pending != null && kept.isEmpty) {
+  if (pending != null && kept.isNotEmpty) {
+    _giveRestNote(kept.last, pending, leading: false);
+  } else if (pending != null) {
     kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
   }
   return kept;
+}
+
+void _giveRestNote(ParsedSession session, String note, {required bool leading}) {
+  session.notes = leading
+      ? _joinNotes(note, session.notes)
+      : _joinNotes(session.notes, note);
+  if (session.sets.isEmpty) {
+    return;
+  }
+  final set = leading ? session.sets.first : session.sets.last;
+  set.notes = leading ? _joinNotes(note, set.notes) : _joinNotes(set.notes, note);
 }
 
 bool _isRestOnly(ParsedSession session) {

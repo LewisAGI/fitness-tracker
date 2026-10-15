@@ -24,7 +24,8 @@ bool confirmNeedsReview(ParseResult result) {
           set.loadFlagged ||
           set.heavy ||
           set.rejected ||
-          set.summary.contains('?')) {
+          set.summary.contains('?') ||
+          _emptyStrength(set)) {
         return true;
       }
     }
@@ -40,6 +41,13 @@ bool confirmNeedsReview(ParseResult result) {
     }
   }
   return false;
+}
+
+bool _emptyStrength(ParsedSet set) {
+  return set.category == 'strength' &&
+      set.sets == null &&
+      set.reps == null &&
+      set.weightKg == null;
 }
 
 class ConfirmCard extends StatefulWidget {
