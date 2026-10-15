@@ -15,6 +15,7 @@ import '../services/readiness.dart';
 import '../services/rules.dart';
 import '../services/voice_parser.dart';
 import 'database.dart';
+import 'exercise_seed.dart';
 
 class DayBundle {
   const DayBundle({
@@ -340,6 +341,7 @@ class Store extends ChangeNotifier {
       'type': session.type,
       'duration_min': session.durationMin,
       'rpe': session.rpe,
+      'notes': session.notes,
       'raw_transcript': session.raw,
     });
     await _writeSessionChildren(txn, id, session);
@@ -1065,6 +1067,7 @@ class Store extends ChangeNotifier {
           muscleGroups: decodeStrings(row['muscle_groups'] as String?),
           aliases: decodeStrings(row['aliases'] as String?),
           defaultLoadFactor: (row['default_load_factor'] as num).toDouble(),
+          bodyweight: seededBodyweight(row['name'] as String),
         ),
     ];
   }

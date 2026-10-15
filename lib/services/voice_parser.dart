@@ -70,6 +70,9 @@ class ParsedSet {
     this.rirSetIndex,
     this.lightBar = false,
     this.ambiguous = false,
+    this.loadFlagged = false,
+    this.heavy = false,
+    this.rejected = false,
   });
 
   int? exerciseId;
@@ -88,6 +91,9 @@ class ParsedSet {
   int? rirSetIndex;
   bool lightBar;
   bool ambiguous;
+  bool loadFlagged;
+  bool heavy;
+  bool rejected;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -103,6 +109,9 @@ class ParsedSet {
         : null;
     if (setCount != null && repCount != null) {
       final core = '$name · $setCount×$repCount';
+      if (loadFlagged) {
+        return '$core · ?';
+      }
       return load == null ? core : '$core · $load';
     }
     if (load != null) {
@@ -161,6 +170,7 @@ class ParsedSession {
     List<ParsedSet>? sets,
     List<ParsedBlock>? blocks,
     this.raw = '',
+    this.notes,
     this.ambiguous = false,
   }) : sets = sets ?? <ParsedSet>[],
        blocks = blocks ?? <ParsedBlock>[];
@@ -173,6 +183,7 @@ class ParsedSession {
   final List<ParsedSet> sets;
   final List<ParsedBlock> blocks;
   String raw;
+  String? notes;
 
   String get summary {
     if (ambiguous && sets.isEmpty) {
@@ -404,8 +415,16 @@ class VoiceParser {
       );
     }
 
-    final slots = _strengthSlots(text);
-    final stray = _strayDigits(text);
+    final noted = _pullRest(text);
+    if (noted.text.isEmpty) {
+      return ParsedSession(
+        type: 'other',
+        notes: noted.notes,
+        raw: text,
+      );
+    }
+    final slots = _strengthSlots(noted.text);
+    final stray = _strayDigits(noted.text);
     Exercise? exercise = match?.exercise;
     var unmatched = false;
     var spoken = match?.alias ?? _exerciseFragment(text);
@@ -420,14 +439,23 @@ class VoiceParser {
       unmatched = true;
     }
 
-    final heard = liftRir(text);
+    final heard = liftRir(noted.text);
     final named = heard.setIndex;
     final outOfRange = named != null &&
         slots.sets != null &&
         (named < 0 || named >= slots.sets!);
+    final load = _resolveLoad(
+      noted.text,
+      exercise: exercise,
+      slots: slots,
+      stray: stray,
+    );
+    final rejected = exercise != null &&
+        _exerciseNegated(text, match?.alias ?? exercise.name);
     return ParsedSession(
       type: 'gym',
       raw: text,
+      notes: noted.notes,
       sets: [
         ParsedSet(
           exerciseId: exercise?.id,
@@ -435,8 +463,8 @@ class VoiceParser {
           spoken: spoken,
           sets: stray ? null : slots.sets,
           reps: stray ? null : slots.reps,
-          weightKg: stray ? null : slots.weightKg,
-          bodyweight: stray ? false : slots.bodyweight,
+          weightKg: load.weightKg,
+          bodyweight: load.bodyweight,
           unmatched: unmatched,
           muscleGroups: exercise?.muscleGroups ?? const [],
           category: exercise?.category,
@@ -448,10 +476,13 @@ class VoiceParser {
               ? false
               : _lightBarbell(
                   exercise?.name,
-                  slots.weightKg,
-                  slots.bodyweight,
+                  load.weightKg,
+                  load.bodyweight,
                 ),
           ambiguous: stray,
+          loadFlagged: stray ? false : load.flagged,
+          heavy: load.weightKg != null && load.weightKg! > 300,
+          rejected: rejected,
         ),
       ],
     );
@@ -717,7 +748,7 @@ class VoiceParser {
     final stripped = text
         .replaceAll(
           RegExp(
-            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|hours|hour|hrs|hr|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|but|a|half|in|with|the|not|paused|felt)\b',
+            r'\b(?:\d+(?:\.\d+)?|sets?|reps?|of|at|by|x|for|kg|k|km|rpe|rir|minutes|mins|min|minute|hours|hour|hrs|hr|seconds|second|secs|sec|rest|break|easy|hard|heavy|light|moderate|brutal|comfortable|failure|failed|nearly|near|left|to|two|one|bodyweight|body|weight|bw|and|but|a|half|in|with|the|not|paused|felt)\b',
           ),
           ' ',
         )
@@ -1002,6 +1033,110 @@ bool _ambiguousAmount(String text, String units) {
   ).hasMatch(text);
 }
 
+final _restPhrase = RegExp(
+  r'\b\d+(?:\.\d+)?(?:\s+\d+(?:\.\d+)?)?\s+(?:seconds?|minutes?|secs?|mins?)(?:\s+(?:rest|break))?|\b\d+(?:\.\d+)?\s+(?:rest|break)\b',
+);
+
+class _Noted {
+  const _Noted(this.text, this.notes);
+
+  final String text;
+  final String? notes;
+}
+
+/// "60 seconds rest" and "90 second rest" are notes, not kilograms.
+_Noted _pullRest(String text) {
+  final notes = <String>[];
+  final stripped = text.replaceAllMapped(_restPhrase, (match) {
+    notes.add(match.group(0)!);
+    return ' ';
+  });
+  return _Noted(
+    stripped.replaceAll(RegExp(r'\s+'), ' ').trim(),
+    notes.isEmpty ? null : notes.join('; '),
+  );
+}
+
+String? _joinNotes(String? left, String? right) {
+  if (left == null || left.isEmpty) {
+    return right;
+  }
+  if (right == null || right.isEmpty) {
+    return left;
+  }
+  return '$left; $right';
+}
+
+class _Load {
+  const _Load({this.weightKg, this.bodyweight = false, this.flagged = false});
+
+  final double? weightKg;
+  final bool bodyweight;
+  final bool flagged;
+}
+
+double? _addedLoad(String text) {
+  final plus = RegExp(
+    r'\b(?:plus|added)\s+(\d+(?:\.\d+)?)(?:\s*(?:kg|k))?\b',
+  ).firstMatch(text);
+  if (plus != null) {
+    return double.parse(plus.group(1)!);
+  }
+  final kg = RegExp(
+    r'\b(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos?|kilograms?)\b',
+  ).firstMatch(text);
+  if (kg != null) {
+    return double.parse(kg.group(1)!);
+  }
+  final suffixed = RegExp(r'\b(\d+(?:\.\d+)?)\s*k\b').firstMatch(text);
+  if (suffixed != null) {
+    return double.parse(suffixed.group(1)!);
+  }
+  return null;
+}
+
+_Load _resolveLoad(
+  String text, {
+  required Exercise? exercise,
+  required _Slots slots,
+  required bool stray,
+}) {
+  if (stray) {
+    return const _Load();
+  }
+  final added = _addedLoad(text);
+  if (exercise?.bodyweight == true) {
+    if (added != null) {
+      return _Load(weightKg: added);
+    }
+    if (slots.weightKg != null) {
+      return const _Load(flagged: true);
+    }
+    return const _Load(bodyweight: true);
+  }
+  final weight = added ?? slots.weightKg;
+  return _Load(
+    weightKg: weight,
+    bodyweight: slots.bodyweight && weight == null,
+  );
+}
+
+bool _exerciseNegated(String text, String alias) {
+  final match = RegExp(
+    '\\b${RegExp.escape(alias.toLowerCase())}\\b',
+  ).firstMatch(text.toLowerCase());
+  if (match == null || match.start == 0) {
+    return false;
+  }
+  final prior = text.substring(0, match.start).trim();
+  if (prior.isEmpty) {
+    return false;
+  }
+  final last = prior.split(RegExp(r'\s+')).last;
+  final word = last.replaceAll(RegExp(r"[^a-z']"), '');
+  return _rirNegationWord(word);
+}
+
 /// A second number that the scheme and the weight did not use.
 bool _strayDigits(String text) {
   var rest = text;
@@ -1019,10 +1154,24 @@ bool _strayDigits(String text) {
   rest = rest.replaceAll(RegExp(r'\b\d+\s+reps?\s+\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\s+\d+\s+reps?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+for\s+\d+\b'), ' ');
-  rest = rest.replaceFirst(
-    RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\s+\d+(?:\.\d+)?\b'),
+  rest = rest.replaceAll(_restPhrase, ' ');
+  rest = rest.replaceAll(
+    RegExp(r'\b(?:plus|added)\s+\d+(?:\.\d+)?(?:\s*kg)?\b'),
     ' ',
   );
+  final leading = RegExp(
+    r'\b\d+(?:\.\d+)?(?=\s+\d+\s*(?:x|×|by)\s*\d+\b)',
+  );
+  final trailing = RegExp(
+    r'\b\d+\s*(?:x|×|by)\s*\d+\s+(?!\d+(?:\.\d+)?\s+(?:seconds?|minutes?|secs?|mins?|rest|break)\b)\d+(?:\.\d+)?\b',
+  );
+  final hasLeading = leading.hasMatch(rest);
+  final hasTrailing = trailing.hasMatch(rest);
+  if (hasLeading && !hasTrailing) {
+    rest = rest.replaceFirst(leading, ' ');
+  } else if (hasTrailing && !hasLeading) {
+    rest = rest.replaceFirst(trailing, ' ');
+  }
   rest = rest.replaceAll(RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\bat\s+\d+(?:\.\d+)?(?:\s*kg)?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+(?:\.\d+)?\s*kg\b'), ' ');
@@ -1238,11 +1387,16 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     } else if (atBare != null) {
       weight = double.parse(atBare.group(1)!);
     } else if (by != null) {
-      final bare = RegExp(
+      final leading = RegExp(
+        r'\b(\d+(?:\.\d+)?)\s+\d+\s*(?:x|×|by)\s*\d+\b',
+      ).firstMatch(text);
+      final trailing = RegExp(
         r'\b\d+\s*(?:x|×|by)\s*\d+\s+(\d+(?:\.\d+)?)\b',
       ).firstMatch(text);
-      if (bare != null) {
-        weight = double.parse(bare.group(1)!);
+      if (leading != null && trailing == null) {
+        weight = double.parse(leading.group(1)!);
+      } else if (trailing != null && leading == null) {
+        weight = double.parse(trailing.group(1)!);
       }
     }
     final bodyweight = RegExp(r'\bbody\s*weight\b|\bbw\b').hasMatch(text);
@@ -1261,6 +1415,7 @@ List<ParsedSession> _mergeGym(List<ParsedSession> items) {
       merged.last.sets.addAll(item.sets);
       final previous = merged.last.raw;
       merged.last.raw = '$previous; ${item.raw}';
+      merged.last.notes = _joinNotes(merged.last.notes, item.notes);
     } else {
       merged.add(item);
     }

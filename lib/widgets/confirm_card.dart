@@ -18,7 +18,13 @@ bool confirmNeedsReview(ParseResult result) {
       return true;
     }
     for (final set in session.sets) {
-      if (set.rirFlagged || set.lightBar || set.unmatched || set.summary.contains('?')) {
+      if (set.rirFlagged ||
+          set.lightBar ||
+          set.unmatched ||
+          set.loadFlagged ||
+          set.heavy ||
+          set.rejected ||
+          set.summary.contains('?')) {
         return true;
       }
     }
@@ -126,6 +132,11 @@ class _ConfirmCardState extends State<ConfirmCard> {
                 ),
               ),
               const SizedBox(height: 8),
+              if ((session.notes ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(session.notes!),
+                ),
               if (session.type == 'gym')
                 for (final set in session.sets) _setEditor(set),
               for (final block in session.blocks) _blockEditor(session, block),
@@ -252,6 +263,21 @@ class _ConfirmCardState extends State<ConfirmCard> {
           if (set.lightBar)
             const Tooltip(
               message: 'Bar',
+              child: Icon(Icons.flag, color: AppColors.accent, size: 18),
+            ),
+          if (set.heavy)
+            const Tooltip(
+              message: 'Heavy',
+              child: Icon(Icons.flag, color: AppColors.accent, size: 18),
+            ),
+          if (set.loadFlagged)
+            const Tooltip(
+              message: 'Load',
+              child: Icon(Icons.flag, color: AppColors.accent, size: 18),
+            ),
+          if (set.rejected)
+            const Tooltip(
+              message: 'Not',
               child: Icon(Icons.flag, color: AppColors.accent, size: 18),
             ),
         ],

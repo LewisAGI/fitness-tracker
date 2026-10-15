@@ -79,7 +79,7 @@ String normaliseTranscript(
   text = text.replaceAll(RegExp(r'[.!?]'), ' ; ');
   text = text.replaceAll('§', '.');
   text = _durationIdioms(text);
-  text = text.replaceAll(RegExp(r'\bheart\s+rate\b[^,;]*?\bbpm\b'), ' ');
+  text = _stripPulse(text);
   text = _numberWords(text);
   text = _durationIdioms(text);
   text = text.replaceAllMapped(
@@ -342,8 +342,12 @@ const _weightUnits = {
 
 /// A casual plate ("two twenty", "one oh two") is a weight when it follows
 /// "at", sits immediately before kg/kilos, or follows a lift scheme
-/// ("5 by 5 one forty"). It is not a weight in "two twenty minutes".
+/// ("5 by 5 one forty"). It is not a weight in "two twenty minutes"
+/// or "two twenty seconds".
 bool _weightContext(List<String> tokens, int start, int consumed) {
+  if (_timeUnitFollows(tokens, start + consumed)) {
+    return false;
+  }
   if (start > 0 && _splitWord(tokens[start - 1])?.word == 'at') {
     return true;
   }
@@ -351,6 +355,54 @@ bool _weightContext(List<String> tokens, int start, int consumed) {
     return true;
   }
   return _weightUnitFollows(tokens, start + consumed);
+}
+
+const _timeUnits = {
+  'sec',
+  'secs',
+  'second',
+  'seconds',
+  'min',
+  'mins',
+  'minute',
+  'minutes',
+  'rest',
+  'break',
+};
+
+bool _timeUnitFollows(List<String> tokens, int index) {
+  if (index >= tokens.length) {
+    return false;
+  }
+  final word = _splitWord(tokens[index])?.word;
+  return word != null && _timeUnits.contains(word);
+}
+
+const _pulseNumber =
+    'zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|\\d+(?:\\.\\d+)?';
+
+/// "hr 150", "heart rate was one ten", and "150 bpm" are not load.
+String _stripPulse(String text) {
+  final number = '(?:$_pulseNumber)';
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:heart\\s+rate|hr)\\b[^,;]*?\\bbpm\\b',
+    ),
+    ' ',
+  );
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:heart\\s+rate|hr)\\b(?:\\s+(?:was|is|at|of|around|about|hit|reached))?(?:\\s+$number){1,4}\\b',
+    ),
+    ' ',
+  );
+  text = text.replaceAll(
+    RegExp(
+      '\\b(?:(?:one|two|three|four|five|six|seven|eight|nine)\\s+)?$number\\s+bpm\\b',
+    ),
+    ' ',
+  );
+  return text.replaceAll(RegExp(r'\s+'), ' ');
 }
 
 bool _afterScheme(List<String> tokens, int start) {
