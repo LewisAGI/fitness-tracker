@@ -230,4 +230,140 @@ void main() {
     expect(replaced.weightKg, 90);
     expect(replaced.summary, 'Back squat · 5×3 · 90 kg');
   });
+
+  test('rest N does not replace the weight after at or a scheme', () {
+    final at = parser.parse('bench 3x8 at 60 rest 90');
+    final atSet = at.sessions.single.sets.single;
+    expect(at.sessions.single.type, 'gym');
+    expect(atSet.sets, 3);
+    expect(atSet.reps, 8);
+    expect(atSet.weightKg, 60);
+    expect(at.sessions.single.notes, 'rest 90');
+    expect(atSet.summary, 'Bench press · 3×8 · 60 kg');
+    expect(confirmNeedsReview(at), isFalse);
+
+    final bare = parser.parse('bench 3x8 60 rest 90');
+    final bareSet = bare.sessions.single.sets.single;
+    expect(bareSet.weightKg, 60);
+    expect(bare.sessions.single.notes, 'rest 90');
+    expect(bareSet.summary, 'Bench press · 3×8 · 60 kg');
+    expect(confirmNeedsReview(bare), isFalse);
+  });
+
+  test('a following rest duration does not swallow the weight', () {
+    final squat = parser.parse('squat 5x5 100 2 minutes rest');
+    final squatSet = squat.sessions.single.sets.single;
+    expect(squatSet.sets, 5);
+    expect(squatSet.reps, 5);
+    expect(squatSet.weightKg, 100);
+    expect(squat.sessions.single.notes, '2 minutes rest');
+    expect(squatSet.summary, 'Back squat · 5×5 · 100 kg');
+    expect(confirmNeedsReview(squat), isFalse);
+
+    final bench = parser.parse('bench 3x8 at 60 2 minutes rest');
+    expect(bench.sessions.single.type, 'gym');
+    expect(bench.sessions.single.sets.single.weightKg, 60);
+    expect(bench.sessions.single.notes, '2 minutes rest');
+    expect(bench.sessions.single.sets.single.summary, 'Bench press · 3×8 · 60 kg');
+    expect(confirmNeedsReview(bench), isFalse);
+  });
+
+  test('number words do not cross into a rest duration', () {
+    final plate = parser.parse('squat 5x5 one forty two minutes rest');
+    final set = plate.sessions.single.sets.single;
+    expect(plate.normalised, contains('140'));
+    expect(plate.normalised, isNot(contains('142')));
+    expect(set.sets, 5);
+    expect(set.reps, 5);
+    expect(set.weightKg, 140);
+    expect(plate.sessions.single.notes, '2 minutes rest');
+    expect(set.summary, 'Back squat · 5×5 · 140 kg');
+    expect(confirmNeedsReview(plate), isFalse);
+
+    final hundred = parser.parse('at one hundred, two minutes rest');
+    expect(hundred.normalised, contains('100'));
+    expect(hundred.normalised, isNot(contains('102')));
+    expect(hundred.sessions.single.notes, contains('2 minutes'));
+    expect(hundred.sessions.single.summary, isNot(contains('102')));
+  });
+
+  test('a lift plus rest minutes stays the gym set', () {
+    final parsed = parser.parse('bench 3x8 at 60 rest 2 minutes');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.type, 'gym');
+    expect(parsed.sessions.single.summary, isNot(contains('Other')));
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, 60);
+    expect(parsed.sessions.single.notes, 'rest 2 minutes');
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('a weight absorbed by a rest note is held for review', () {
+    final parsed = parser.parse('bench 3x8 at 60 seconds rest');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Bench press');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, isNull);
+    expect(set.loadFlagged, isTrue);
+    expect(parsed.sessions.single.notes, contains('60'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('two twenty seconds rest is not a plate weight', () {
+    final parsed = parser.parse('bench 3x8 two twenty seconds rest');
+    final set = parsed.sessions.single.sets.single;
+    expect(parsed.sessions.single.type, 'gym');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, isNull);
+    expect(set.summary, isNot(contains('220')));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('at 60 plus 2.5 keeps both plates', () {
+    final set = setOf('bench 3x8 at 60 plus 2.5');
+    expect(set.sets, 3);
+    expect(set.reps, 8);
+    expect(set.weightKg, 62.5);
+    expect(set.loadFlagged, isFalse);
+    expect(set.summary, 'Bench press · 3×8 · 62.5 kg');
+
+    final bare = parser.parse('at 60 plus 2.5');
+    final weights = [
+      for (final session in bare.sessions)
+        for (final row in session.sets) row.weightKg,
+    ];
+    expect(weights, isNot(contains(2.5)));
+    expect(weights.single, anyOf(62.5, isNull));
+    if (weights.single == null) {
+      expect(confirmNeedsReview(bare), isTrue);
+    }
+  });
+
+  test('rested 2 minutes does not auto-save another entry', () {
+    final alone = parser.parse('rested 2 minutes');
+    expect(alone.sessions, hasLength(1));
+    expect(alone.sessions.single.summary, contains('?'));
+    expect(alone.sessions.single.summary, isNot('Other · 2 min'));
+    expect(confirmNeedsReview(alone), isTrue);
+
+    final withLift = parser.parse('bench 3x8 at 60, rested 2 minutes');
+    expect(withLift.sessions, hasLength(1));
+    expect(withLift.sessions.single.type, 'gym');
+    expect(withLift.sessions.single.sets, hasLength(1));
+    expect(withLift.sessions.single.sets.single.weightKg, 60);
+    expect(withLift.sessions.single.notes, contains('rested'));
+    expect(withLift.sessions.where((session) => session.type == 'other'), isEmpty);
+  });
+
+  test('hr 150 alone is flagged', () {
+    final parsed = parser.parse('hr 150');
+    expect(parsed.sessions, hasLength(1));
+    expect(parsed.sessions.single.summary, contains('?'));
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
 }

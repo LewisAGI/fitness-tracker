@@ -302,6 +302,9 @@ _ReadInt _finishHundred(List<String> tokens, int start, int hundreds, String hun
   var value = hundreds;
   var consumed = 2;
   var suffix = hundredSuffix;
+  if (hundredSuffix.contains(',')) {
+    return _ReadInt(value, consumed, suffix);
+  }
   var cursor = start + 2;
   if (cursor < tokens.length) {
     final and = _splitWord(tokens[cursor]);
@@ -506,14 +509,18 @@ _ReadInt? _plateShape(List<String> tokens, int start) {
       return _ReadInt(lead * 100 + _ones[last.word]!, 3, last.suffix);
     }
   }
-  final rest = _readUnderHundred(tokens, start + 1);
+  final rest = _readUnderHundred(tokens, start + 1, peelDuration: true);
   if (rest != null && rest.value >= 10 && rest.value < 100) {
     return _ReadInt(lead * 100 + rest.value, 1 + rest.consumed, rest.suffix);
   }
   return null;
 }
 
-_ReadInt? _readUnderHundred(List<String> tokens, int start) {
+_ReadInt? _readUnderHundred(
+  List<String> tokens,
+  int start, {
+  bool peelDuration = false,
+}) {
   if (start >= tokens.length) {
     return null;
   }
@@ -533,11 +540,15 @@ _ReadInt? _readUnderHundred(List<String> tokens, int start) {
   if (_tens.containsKey(first.word) && start + 1 < tokens.length) {
     final next = _splitWord(tokens[start + 1]);
     if (next != null && _ones.containsKey(next.word) && _ones[next.word]! < 10) {
-      return _ReadInt(
-        _tens[first.word]! + _ones[next.word]!,
-        2,
-        next.suffix,
-      );
+      final durationOwnsOnes =
+          peelDuration && _timeUnitFollows(tokens, start + 2);
+      if (!durationOwnsOnes) {
+        return _ReadInt(
+          _tens[first.word]! + _ones[next.word]!,
+          2,
+          next.suffix,
+        );
+      }
     }
   }
   if (_ones.containsKey(first.word)) {
