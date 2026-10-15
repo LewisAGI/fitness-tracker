@@ -45,6 +45,9 @@ bool confirmNeedsReview(ParseResult result) {
 }
 
 bool _implausibleScheme(ParsedSet set) {
+  if (set.bodyweight && _hasDuration(set.notes)) {
+    return false;
+  }
   final sets = set.sets;
   final reps = set.reps;
   return (sets != null && sets > 20) || (reps != null && reps > 100);
@@ -53,12 +56,13 @@ bool _implausibleScheme(ParsedSet set) {
 bool _emptyStrength(ParsedSet set) {
   final timedHold = set.bodyweight && _hasDuration(set.notes);
   final namedBodyweight = set.explicitBodyweight && set.bodyweight;
+  final spokenTimed = namedBodyweight && _hasDuration(set.notes);
   return set.category == 'strength' &&
       set.sets == null &&
       set.reps == null &&
       set.weightKg == null &&
-      !namedBodyweight &&
-      !timedHold;
+      !timedHold &&
+      !spokenTimed;
 }
 
 bool _hasDuration(String? notes) {

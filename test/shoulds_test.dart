@@ -554,7 +554,9 @@ void main() {
     final named = parser.parse('pull ups bodyweight');
     expect(named.sessions.single.sets.single.bodyweight, isTrue);
     expect(named.sessions.single.sets.single.explicitBodyweight, isTrue);
-    expect(confirmNeedsReview(named), isFalse);
+    expect(named.sessions.single.sets.single.sets, isNull);
+    expect(named.sessions.single.sets.single.reps, isNull);
+    expect(confirmNeedsReview(named), isTrue);
   });
 
   test('a trailing rest is named on the last set and read back', () async {
@@ -772,5 +774,100 @@ void main() {
     expect(sets.first.notes, isNull);
     expect(sets.last.notes, 'rest 90');
     expect(parsed.sessions.single.notes, 'squat: rest 90');
+  });
+
+  test('a rest between two lifts is named on the previous one', () {
+    final parsed = parser.parse(
+      'bench 3x8 at 60, rest 2 minutes, squat 5x5 at 100',
+    );
+    final sets = parsed.sessions.single.sets;
+    expect(sets, hasLength(2));
+    expect(sets.first.exerciseName, 'Bench press');
+    expect(sets.first.weightKg, 60);
+    expect(sets.first.notes, 'rest 2 minutes');
+    expect(sets.last.exerciseName, 'Back squat');
+    expect(sets.last.weightKg, 100);
+    expect(sets.last.notes, isNull);
+    expect(parsed.sessions.single.notes, 'bench: rest 2 minutes');
+    expect(parsed.sessions.single.notes, isNot(contains('squat: rest')));
+  });
+
+  test('a timed hold is not cut off by the rep limit', () {
+    final parsed = parser.parse('plank 3 x 120 seconds');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Plank');
+    expect(set.sets, 3);
+    expect(set.bodyweight, isTrue);
+    expect(set.notes, contains('120'));
+    expect(set.notes, contains('second'));
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('bodyweight with a scheme is the load', () {
+    final parsed = parser.parse('squat 5x5 bodyweight');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Back squat');
+    expect(set.sets, 5);
+    expect(set.reps, 5);
+    expect(set.bodyweight, isTrue);
+    expect(set.loadFlagged, isFalse);
+    expect(set.summary, 'Back squat · 5×5 · bodyweight');
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('bodyweight with no reps or duration waits', () {
+    final parsed = parser.parse('push ups bodyweight');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Push-up');
+    expect(set.sets, isNull);
+    expect(set.reps, isNull);
+    expect(set.bodyweight, isTrue);
+    expect(set.explicitBodyweight, isTrue);
+    expect(confirmNeedsReview(parsed), isTrue);
+  });
+
+  test('a plank duration stays separate from the following rest', () {
+    final parsed = parser.parse('plank 60 seconds rest 30');
+    final set = parsed.sessions.single.sets.single;
+    expect(set.exerciseName, 'Plank');
+    expect(set.bodyweight, isTrue);
+    expect(set.ambiguous, isFalse);
+    expect(set.summary, 'Plank · bodyweight');
+    expect(set.summary, isNot(contains('?')));
+    expect(set.notes, contains('60 seconds'));
+    expect(set.notes, contains('rest 30'));
+    expect(parsed.sessions.single.notes, contains('plank: rest 30'));
+    expect(confirmNeedsReview(parsed), isFalse);
+  });
+
+  test('a rest between a run and a bench stays on the bench', () {
+    final parsed = parser.parse('ran 5k, rest 2 minutes, bench');
+    expect(parsed.sessions.map((session) => session.type), ['run', 'gym']);
+    expect(parsed.sessions.first.distanceKm, 5);
+    expect(parsed.sessions.first.notes, isNull);
+    expect(parsed.sessions.last.sets.single.exerciseName, 'Bench press');
+    expect(parsed.sessions.last.sets.single.notes, 'rest 2 minutes');
+    expect(parsed.sessions.last.notes, 'bench: rest 2 minutes');
+  });
+
+  test('spoken bodyweight does not fill a barbell set', () {
+    final result = ParseResult(
+      normalised: 'bench bodyweight for 10 minutes',
+      plans: const [],
+      sessions: [
+        ParsedSession(
+          type: 'gym',
+          sets: [
+            ParsedSet(
+              exerciseName: 'Bench press',
+              category: 'strength',
+              explicitBodyweight: true,
+              notes: 'for 10 minutes',
+            ),
+          ],
+        ),
+      ],
+    );
+    expect(confirmNeedsReview(result), isTrue);
   });
 }

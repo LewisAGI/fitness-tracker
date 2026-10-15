@@ -463,7 +463,10 @@ class VoiceParser {
 
     final timed = _pullForDuration(text);
     text = timed.text;
-    final liftNotes = _joinNotes(noted.notes, timed.notes);
+    final liftNotes = _joinNotes(
+      _joinNotes(noted.notes, timed.notes),
+      _schemeDuration(text),
+    );
     final slots = _strengthSlots(text);
     final stray = _strayDigits(text);
     Exercise? exercise = match?.exercise;
@@ -1109,10 +1112,10 @@ _Noted _pullRest(String text) {
       '\\b(?:rested|rest|break)\\s+\\d+(?:\\.\\d+)?(?:\\s+(?:$_restTimeUnit))?(?!\\s*(?:x|×|by)\\s*\\d)(?!\\s+(?:sets?|reps?|x|by)\\b)',
     ),
     RegExp(
-      '\\b[1-9]\\s+(?:1[0-9]|[2-9]\\d)\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break))?\\b',
+      '\\b[1-9]\\s+(?:1[0-9]|[2-9]\\d)\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break)(?!\\s+\\d))?\\b',
     ),
     RegExp(
-      '\\b\\d+(?:\\.\\d+)?\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break))?\\b',
+      '\\b\\d+(?:\\.\\d+)?\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break)(?!\\s+\\d))?\\b',
     ),
     RegExp(
       '\\b\\d+(?:\\.\\d+)?\\s+(?:minutes?|mins?)\\s+(?:rest|break)\\b',
@@ -1167,6 +1170,17 @@ _Noted _pullRest(String text) {
     match: match,
     note: '${match.group(1)} ${minutes * 60 + seconds} seconds',
   );
+}
+
+/// "3x120 seconds" is a timed hold, not 120 reps.
+String? _schemeDuration(String text) {
+  final match = RegExp(
+    r'\b\d+\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b',
+  ).firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  return '${match.group(1)} ${match.group(2)}';
 }
 
 _Noted _pullForDuration(String text) {
@@ -1306,6 +1320,9 @@ _Load _resolveLoad(
   }
   final weight = slots.weightKg;
   if (slots.bodyweight && weight == null) {
+    if (slots.sets != null && slots.reps != null) {
+      return const _Load(bodyweight: true);
+    }
     return const _Load(flagged: true);
   }
   return _Load(weightKg: weight);
@@ -1621,6 +1638,12 @@ List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
       continue;
     }
     if (pending != null && item.type == 'gym') {
+      if (kept.isNotEmpty && kept.last.type == 'gym') {
+        _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
+        pending = null;
+        kept.add(item);
+        continue;
+      }
       final run = <ParsedSession>[item];
       var j = i + 1;
       while (j < items.length && items[j].type == 'gym') {
