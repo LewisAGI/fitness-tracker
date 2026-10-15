@@ -56,6 +56,7 @@ class Store extends ChangeNotifier {
   CheckInSchedule schedule = CheckInSchedule.defaults;
   int roundMinutes = 3;
   var notificationsDenied = false;
+  Future<void> _weekGate = Future<void>.value();
 
   DateTime now() => _clock();
 
@@ -158,7 +159,15 @@ class Store extends ChangeNotifier {
     );
   }
 
-  Future<WeekBundle> loadWeek(DateTime anchor) async {
+  Future<WeekBundle> loadWeek(DateTime anchor) {
+    // Plan reloads on every store change. Overlapping refreshes both insert
+    // the same suggestion row and hit the unique key.
+    final run = _weekGate.then((_) => _loadWeek(anchor));
+    _weekGate = run.then((_) {}, onError: (Object _, StackTrace _) {});
+    return run;
+  }
+
+  Future<WeekBundle> _loadWeek(DateTime anchor) async {
     final start = weekStart(anchor);
     await refreshWarnings(start);
     await refreshSuggestions(start.subtract(const Duration(days: 7)));

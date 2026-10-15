@@ -88,7 +88,10 @@ void main() {
     await _pump(tester, store, RecordingNotifications());
 
     await tester.tap(find.byKey(const ValueKey('tab-Plan')));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () => find.text('12–18 Oct 2026').evaluate().isNotEmpty,
+    );
 
     expect(find.text('12–18 Oct 2026'), findsOneWidget);
     expect(find.byKey(const ValueKey('weekly-cards')), findsOneWidget);
@@ -120,7 +123,10 @@ void main() {
 
     port.calls.clear();
     await tester.tap(find.byKey(const ValueKey('Morning-switch')));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () => port.calls.contains('cancel:${CheckInSchedule.morningId}'),
+    );
     expect(store.schedule.morningEnabled, isFalse);
     expect(port.calls, contains('cancel:${CheckInSchedule.morningId}'));
     expect(
@@ -140,7 +146,10 @@ void main() {
     expect(find.text('Mon'), findsWidgets);
 
     await tester.tap(find.byKey(const ValueKey('history-2026-10-12')));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () => find.textContaining('Morning ·').evaluate().isNotEmpty,
+    );
     expect(find.text('Mon 12 Oct'), findsWidgets);
     expect(find.textContaining('Morning ·'), findsOneWidget);
     await tester.tap(find.byTooltip('Close'));
@@ -175,7 +184,10 @@ void main() {
     expect(find.textContaining('Pads'), findsWidgets);
     expect(find.textContaining('Clinch'), findsWidgets);
     await tester.tap(find.byTooltip('Save'));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () => find.byKey(const ValueKey('confirm-card')).evaluate().isEmpty,
+    );
     final day = await tester.runAsync(() => store.loadDay(DateTime(2026, 10, 12)));
     expect(day!.sessions.where((session) => session.blocks.length == 3), isNotEmpty);
 
@@ -207,12 +219,23 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tab-Settings')));
     await _settle(tester);
     await tester.tap(find.byKey(const ValueKey('Morning-switch')));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () {
+        final morning = tester.widget<Switch>(find.byKey(const ValueKey('Morning-switch')));
+        return !morning.value && port.calls.contains('schedule:evening:21:0');
+      },
+    );
     expect(store.schedule.morningEnabled, isFalse);
 
     port.calls.clear();
     await tester.tap(find.byKey(const ValueKey('Morning-switch')));
-    await _settle(tester);
+    await _settle(
+      tester,
+      ready: () =>
+          port.calls.contains('permissions') &&
+          find.byIcon(Icons.notifications_off).evaluate().isNotEmpty,
+    );
     expect(store.schedule.morningEnabled, isFalse);
     expect(port.calls, ['permissions']);
     expect(find.byIcon(Icons.notifications_off), findsOneWidget);
@@ -270,12 +293,27 @@ Future<void> _pump(WidgetTester tester, Store store, RecordingNotifications port
       speech: SpeechCapture(),
     ),
   );
-  await _settle(tester);
+  await _settle(
+    tester,
+    ready: () => find.text('Gym · legs · hard').evaluate().isNotEmpty,
+  );
 }
 
-Future<void> _settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+/// sqflite finishes on real time, outside FakeAsync. [ready] waits until that
+/// work has updated the tree or the notification port, instead of a fixed slice.
+Future<void> _settle(WidgetTester tester, {bool Function()? ready}) async {
+  const slices = 40;
+  final limit = ready == null ? 8 : slices;
+  for (var i = 0; i < limit; i++) {
+    await tester.pump();
+    if (ready != null && ready()) {
+      break;
+    }
+    if (i + 1 >= limit) {
+      break;
+    }
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+  }
   await tester.pumpAndSettle();
 }
 
