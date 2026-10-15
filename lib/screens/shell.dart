@@ -38,13 +38,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.store.pendingSlot.addListener(_onPending);
+    widget.store.addListener(_refresh);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.store.pendingSlot.removeListener(_onPending);
+    widget.store.removeListener(_refresh);
     super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -91,7 +99,20 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       SettingsScreen(store: widget.store, scheduler: widget.scheduler),
     ];
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: Stack(
+        children: [
+          IndexedStack(index: _index, children: pages),
+          if (widget.store.notificationsDenied)
+            const Positioned(
+              top: 8,
+              right: 8,
+              child: Tooltip(
+                message: 'Notifications',
+                child: Icon(Icons.notifications_off, color: AppColors.accent),
+              ),
+            ),
+        ],
+      ),
       bottomNavigationBar: DecoratedBox(
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: AppColors.hairline)),

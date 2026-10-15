@@ -67,6 +67,7 @@ class ParsedSet {
     this.rir,
     this.rirLastOnly = false,
     this.rirFlagged = false,
+    this.rirSetIndex,
   });
 
   int? exerciseId;
@@ -82,6 +83,7 @@ class ParsedSet {
   int? rir;
   bool rirLastOnly;
   bool rirFlagged;
+  int? rirSetIndex;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -241,11 +243,12 @@ class VoiceParser {
   factory VoiceParser.seeded() => VoiceParser(seedExercises());
 
   ParseResult parse(String input, {Exercise? lastExercise}) {
+    final spoken = input.trim();
     final imperial = RegExp(
       r'\b(?:lbs?|pounds?|miles?|mi)\b',
       caseSensitive: false,
-    ).hasMatch(input);
-    final normalised = normaliseTranscript(input);
+    ).hasMatch(spoken);
+    final normalised = normaliseTranscript(spoken);
     if (_hasWeekday(normalised)) {
       return ParseResult(
         normalised: normalised,
@@ -275,9 +278,13 @@ class VoiceParser {
         }
       }
     }
+    final sessions = _mergeGym(parsed);
+    for (final session in sessions) {
+      session.raw = spoken;
+    }
     return ParseResult(
       normalised: normalised,
-      sessions: _mergeGym(parsed),
+      sessions: sessions,
       plans: const [],
       imperial: imperial,
     );
@@ -399,6 +406,7 @@ class VoiceParser {
           rir: heard.value,
           rirLastOnly: heard.lastOnly,
           rirFlagged: heard.flagged,
+          rirSetIndex: heard.setIndex,
         ),
       ],
     );
@@ -1269,20 +1277,29 @@ String _titleWord(String word) {
 }
 
 class LiftRir {
-  const LiftRir({this.value, this.flagged = false, this.lastOnly = false});
+  const LiftRir({
+    this.value,
+    this.flagged = false,
+    this.lastOnly = false,
+    this.setIndex,
+  });
 
   final int? value;
   final bool flagged;
   final bool lastOnly;
+
+  /// Zero-based set when failure named one, such as the first set or set 2.
+  final int? setIndex;
 }
 
 /// Reps in reserve for one lift line.
 ///
-/// Decimals round half away from zero (`1.5` → `2`; RPE `8.5` is `10 - 8.5` = `1.5` → `2`).
-/// RIR outside 0–5, and RPE outside 5–10, come back null and flagged so they cannot step a
-/// weight up. A negation within the three words before a phrase (`not to failure`,
-/// `nowhere near failure`, `not easy`) is also null and flagged. Failure phrases apply to
-/// the last set only.
+/// Decimals round down (`1.5` → `1`; RPE `8.5` is `10 - 8.5` = `1.5` → `1`) so a fraction
+/// never becomes a step-up. RIR outside 0–5, and RPE outside 5–10, come back null and flagged.
+/// A negation within the three words before a phrase is also null and flagged. That includes
+/// `not`, `hardly`, `barely`, and any word ending in n't (`wasn't`, `didn't`, `isn't`, `wasnt`).
+/// Failure with no set number applies to the last set. `failed on the first set` and
+/// `failed on set 2` apply to that set.
 LiftRir liftRir(String text) {
   final explicit = RegExp(r'\brir\s+(\d+(?:\.\d+)?)\b').firstMatch(text);
   if (explicit != null) {
@@ -1320,17 +1337,43 @@ LiftRir liftRir(String text) {
     if (_rirNegated(text, match.start)) {
       return const LiftRir(flagged: true);
     }
+    if (phrase.$3) {
+      final named = _namedSet(text);
+      if (named != null) {
+        return LiftRir(value: 0, setIndex: named);
+      }
+    }
     return LiftRir(value: phrase.$2, lastOnly: phrase.$3);
   }
   return const LiftRir();
 }
 
 LiftRir _acceptRir(double raw) {
-  final rounded = raw.round();
+  final rounded = raw.floor();
   if (rounded < 0 || rounded > 5) {
     return const LiftRir(flagged: true);
   }
   return LiftRir(value: rounded);
+}
+
+int? _namedSet(String text) {
+  final numbered = RegExp(r'\bon\s+(?:the\s+)?set\s+(\d+)\b').firstMatch(text);
+  if (numbered != null) {
+    final number = int.parse(numbered.group(1)!);
+    if (number >= 1) {
+      return number - 1;
+    }
+  }
+  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?first\s+set\b').hasMatch(text)) {
+    return 0;
+  }
+  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?second\s+set\b').hasMatch(text)) {
+    return 1;
+  }
+  if (RegExp(r'\b(?:on\s+)?(?:the\s+)?third\s+set\b').hasMatch(text)) {
+    return 2;
+  }
+  return null;
 }
 
 bool _rirNegated(String text, int index) {
@@ -1340,14 +1383,26 @@ bool _rirNegated(String text, int index) {
   }
   final words = prior.split(RegExp(r'\s+'));
   final start = words.length > 3 ? words.length - 3 : 0;
-  const negations = {'not', 'nowhere', 'never', 'no', "isn't", 'isnt', "don't", 'dont'};
   for (var i = start; i < words.length; i++) {
     final word = words[i].replaceAll(RegExp(r"[^a-z']"), '');
-    if (negations.contains(word)) {
+    if (_rirNegationWord(word)) {
       return true;
     }
   }
   return false;
+}
+
+bool _rirNegationWord(String word) {
+  if (word.endsWith("n't")) {
+    return true;
+  }
+  if (RegExp(
+    r"^(?:was|were|is|are|did|does|do|had|has|have|would|could|should|must|need|ai|wo|ca)nt$",
+  ).hasMatch(word)) {
+    return true;
+  }
+  const words = {'not', 'nowhere', 'never', 'no', 'hardly', 'barely'};
+  return words.contains(word);
 }
 
 ParseResult sessionToParseResult(Session session) {

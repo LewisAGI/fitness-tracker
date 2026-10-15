@@ -26,8 +26,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  var _notificationsDenied = false;
-
   @override
   void initState() {
     super.initState();
@@ -54,15 +52,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (enabling) {
       final allowed = await widget.scheduler.requestPermissions();
       if (!allowed) {
-        if (!mounted) {
-          return;
-        }
-        setState(() => _notificationsDenied = true);
+        await widget.store.setNotificationsDenied(true);
         return;
       }
     }
-    if (_notificationsDenied && mounted) {
-      setState(() => _notificationsDenied = false);
+    if (enabling && widget.store.notificationsDenied) {
+      await widget.store.setNotificationsDenied(false);
     }
     await widget.store.setSchedule(next);
     await widget.scheduler.reschedule(next);
@@ -156,13 +151,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: ListView(
         children: [
-          if (_notificationsDenied)
-            const ListTile(
-              leading: Tooltip(
-                message: 'Notifications',
-                child: Icon(Icons.notifications_off, color: AppColors.accent),
-              ),
-            ),
           _row(
             icon: Icons.wb_sunny_outlined,
             message: 'Morning',

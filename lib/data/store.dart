@@ -55,6 +55,7 @@ class Store extends ChangeNotifier {
   List<Exercise> exercises = [];
   CheckInSchedule schedule = CheckInSchedule.defaults;
   int roundMinutes = 3;
+  var notificationsDenied = false;
 
   DateTime now() => _clock();
 
@@ -63,6 +64,7 @@ class Store extends ChangeNotifier {
     exercises = await _readExercises();
     schedule = await _readSchedule();
     roundMinutes = int.tryParse(await _setting('round_minutes') ?? '') ?? 3;
+    notificationsDenied = (await _setting('notifications_denied') ?? '0') == '1';
     notifyListeners();
   }
 
@@ -123,6 +125,12 @@ class Store extends ChangeNotifier {
       'evening_hm',
       fmtHm(next.eveningHour, next.eveningMinute),
     );
+    notifyListeners();
+  }
+
+  Future<void> setNotificationsDenied(bool denied) async {
+    notificationsDenied = denied;
+    await _putSetting('notifications_denied', denied ? '1' : '0');
     notifyListeners();
   }
 
@@ -279,7 +287,19 @@ class Store extends ChangeNotifier {
   ) async {
     for (final set in session.sets) {
       final count = set.sets;
-      if (set.rirLastOnly && count != null && count > 1) {
+      final named = set.rirSetIndex;
+      if (named != null && count != null && count > 1) {
+        for (var i = 0; i < count; i++) {
+          await _insertSet(
+            txn,
+            sessionId: id,
+            set: set,
+            setCount: 1,
+            rpe: session.rpe,
+            rir: i == named ? set.rir : null,
+          );
+        }
+      } else if (set.rirLastOnly && count != null && count > 1) {
         for (var i = 0; i < count; i++) {
           await _insertSet(
             txn,

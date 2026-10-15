@@ -10,18 +10,37 @@ void main() {
   ParsedSet setOf(String text) => parser.parse(text).sessions.single.sets.single;
 
   test('negations do not map RIR', () {
-    for (final phrase in ['not to failure', 'nowhere near failure', 'not easy']) {
+    for (final phrase in [
+      'not to failure',
+      'nowhere near failure',
+      'not easy',
+      "wasn't easy",
+      "didn't easy",
+      'wasnt easy',
+    ]) {
       final set = setOf('bench 3x8 at 80 $phrase');
       expect(set.rir, isNull, reason: phrase);
       expect(set.rirFlagged, isTrue, reason: phrase);
     }
+    final twoBack = setOf('bench 3x8 at 80 wasn\'t really easy');
+    expect(twoBack.rir, isNull);
+    expect(twoBack.rirFlagged, isTrue);
+    final threeBack = setOf('bench 3x8 at 80 didn\'t quite feel easy');
+    expect(threeBack.rir, isNull);
+    expect(threeBack.rirFlagged, isTrue);
+    final hardly = setOf('bench 3x8 at 80 hardly even easy');
+    expect(hardly.rir, isNull);
+    expect(hardly.rirFlagged, isTrue);
+    final barely = setOf('bench 3x8 at 80 barely even that easy');
+    expect(barely.rir, isNull);
+    expect(barely.rirFlagged, isTrue);
   });
 
-  test('decimals round half away from zero and out of range is flagged', () {
+  test('decimals round down so a fraction cannot step up', () {
     final half = setOf('bench 3x8 at 80 RIR 1.5');
-    expect(half.rir, 2);
+    expect(half.rir, 1);
     expect(half.rirFlagged, isFalse);
-    expect(setOf('bench 3x8 at 80 RPE 8.5').rir, 2);
+    expect(setOf('bench 3x8 at 80 RPE 8.5').rir, 1);
     final ten = setOf('bench 3x8 at 80 RIR 10');
     expect(ten.rir, isNull);
     expect(ten.rirFlagged, isTrue);
@@ -45,6 +64,21 @@ void main() {
     expect(setOf('bench 102 point 5 kilos').weightKg, 102.5);
   });
 
+  test('hundreds are composed before point five', () {
+    expect(
+      setOf('bench one hundred and two point five kilos').weightKg,
+      102.5,
+    );
+    expect(
+      setOf('squat one hundred and twelve point five kilos').weightKg,
+      112.5,
+    );
+    expect(
+      setOf('deadlift one hundred and forty two point five kilos').weightKg,
+      142.5,
+    );
+  });
+
   test('I mean replaces the scheme and actually replaces the exercise', () {
     final scheme = setOf('bench 3x8 I mean 3x10 at 60 kg');
     expect(scheme.exerciseName, 'Bench press');
@@ -57,6 +91,11 @@ void main() {
     expect(swapped.sets, 3);
     expect(swapped.reps, 5);
     expect(swapped.weightKg, 100);
+
+    final spoken = setOf('bench 4 sets of 8 I mean 3x10 at 60 kg');
+    expect(spoken.sets, 3);
+    expect(spoken.reps, 10);
+    expect(spoken.weightKg, 60);
   });
 
   test('6 rounds of 2 min is 12 minutes', () {
@@ -81,6 +120,36 @@ void main() {
     expect(parser.parse('bench 3x8 at 100 pounds').imperial, isTrue);
     expect(parser.parse('ran 3 miles').imperial, isTrue);
     expect(parser.parse('bench 3x8 at 80 kg').imperial, isFalse);
+  });
+
+  test('failure names the set it belongs to', () async {
+    final first = setOf('bench 3x8 failed on the first set');
+    expect(first.rir, 0);
+    expect(first.rirSetIndex, 0);
+    expect(first.rirLastOnly, isFalse);
+    final second = setOf('bench 3x8 failed on set 2');
+    expect(second.rir, 0);
+    expect(second.rirSetIndex, 1);
+
+    final store = await openStore();
+    await store.saveParse(parser.parse('bench 3x8 failed on the first set'));
+    await store.saveParse(
+      parser.parse('row 3x8 failed on set 2'),
+      on: DateTime(2026, 10, 13),
+    );
+    final bench = (await store.loadDay(DateTime(2026, 10, 12))).sessions.single.sets;
+    expect(bench.map((set) => set.rir), [0, null, null]);
+    final row = (await store.loadDay(DateTime(2026, 10, 13))).sessions.single.sets;
+    expect(row.map((set) => set.rir), [null, 0, null]);
+  });
+
+  test('the saved transcript keeps its original case', () async {
+    final store = await openStore();
+    final parsed = parser.parse('Bench Press 3x8 at 80 kg');
+    expect(parsed.sessions.single.raw, 'Bench Press 3x8 at 80 kg');
+    await store.saveParse(parsed);
+    final day = await store.loadDay(DateTime(2026, 10, 12));
+    expect(day.sessions.single.rawTranscript, 'Bench Press 3x8 at 80 kg');
   });
 
   test('failed on last rep stores RIR 0 on the last set only', () async {

@@ -112,7 +112,9 @@ String _corrections(String text) {
     final rest = current.substring(match.end);
     final token = RegExp(r'^(\S+)').firstMatch(rest)?.group(1) ?? '';
     var before = current.substring(0, match.start);
-    if (RegExp(r'^[a-z]').hasMatch(token)) {
+    if (RegExp(r'^\d+x\d+\b').hasMatch(rest)) {
+      before = before.replaceFirst(scheme, '');
+    } else if (RegExp(r'^[a-z]').hasMatch(token)) {
       final tail = scheme.firstMatch(before);
       final head = tail == null ? before : before.substring(0, tail.start);
       final kept = tail == null ? '' : before.substring(tail.start);
@@ -148,43 +150,115 @@ String _durationIdioms(String text) {
   return text;
 }
 
+/// Compose a whole integer, including hundreds, before any later "point" fraction.
 String _numberWords(String input) {
-  final tokens = input.split(RegExp(r'\s+'));
+  final tokens = input.split(RegExp(r'\s+')).where((token) => token.isNotEmpty);
+  final pending = tokens.toList();
   final out = <String>[];
-  for (var i = 0; i < tokens.length; i++) {
-    final raw = tokens[i];
-    if (raw.isEmpty) {
+  for (var i = 0; i < pending.length; i++) {
+    final read = _readInteger(pending, i);
+    if (read == null) {
+      out.add(pending[i]);
       continue;
     }
-    final match = RegExp(r"^([a-z-]+)([^a-z-]*)$").firstMatch(raw);
-    if (match == null) {
-      out.add(raw);
-      continue;
-    }
-    final word = match.group(1)!;
-    final suffix = match.group(2)!;
-    if (_tens.containsKey(word) && i + 1 < tokens.length) {
-      final nextMatch = RegExp(
-        r'^([a-z-]+)([^a-z-]*)$',
-      ).firstMatch(tokens[i + 1]);
-      final next = nextMatch?.group(1);
-      if (next != null && _ones.containsKey(next) && _ones[next]! < 10) {
-        out.add('${_tens[word]! + _ones[next]!}${nextMatch!.group(2)!}');
-        i++;
-        continue;
-      }
-    }
-    if (_ones.containsKey(word)) {
-      out.add('${_ones[word]}$suffix');
-      continue;
-    }
-    if (_tens.containsKey(word)) {
-      out.add('${_tens[word]}$suffix');
-      continue;
-    }
-    out.add(raw);
+    out.add('${read.value}${read.suffix}');
+    i += read.consumed - 1;
   }
   return out.join(' ');
+}
+
+class _ReadInt {
+  const _ReadInt(this.value, this.consumed, this.suffix);
+
+  final int value;
+  final int consumed;
+  final String suffix;
+}
+
+final _wordToken = RegExp(r'^([a-z-]+)([^a-z-]*)$');
+
+({String word, String suffix})? _splitWord(String raw) {
+  final match = _wordToken.firstMatch(raw);
+  if (match == null) {
+    return null;
+  }
+  return (word: match.group(1)!, suffix: match.group(2)!);
+}
+
+_ReadInt? _readInteger(List<String> tokens, int start) {
+  final first = _splitWord(tokens[start]);
+  if (first == null) {
+    return null;
+  }
+  final ones = _ones[first.word];
+  if (ones != null && ones >= 1 && ones <= 9 && start + 1 < tokens.length) {
+    final hundred = _splitWord(tokens[start + 1]);
+    if (hundred != null && hundred.word == 'hundred') {
+      var value = ones * 100;
+      var consumed = 2;
+      var suffix = hundred.suffix;
+      var cursor = start + 2;
+      if (cursor < tokens.length) {
+        final and = _splitWord(tokens[cursor]);
+        if (and != null && and.word == 'and' && and.suffix.isEmpty) {
+          final afterAnd = _readUnderHundred(tokens, cursor + 1);
+          if (afterAnd != null) {
+            cursor += 1;
+            value += afterAnd.value;
+            return _ReadInt(
+              value,
+              (cursor - start) + afterAnd.consumed,
+              afterAnd.suffix,
+            );
+          }
+        }
+      }
+      final rest = _readUnderHundred(tokens, cursor);
+      if (rest != null) {
+        value += rest.value;
+        consumed = (cursor - start) + rest.consumed;
+        suffix = rest.suffix;
+      }
+      return _ReadInt(value, consumed, suffix);
+    }
+  }
+  return _readUnderHundred(tokens, start);
+}
+
+_ReadInt? _readUnderHundred(List<String> tokens, int start) {
+  if (start >= tokens.length) {
+    return null;
+  }
+  final first = _splitWord(tokens[start]);
+  if (first == null) {
+    return null;
+  }
+  if (first.word.contains('-')) {
+    final bits = first.word.split('-');
+    if (bits.length == 2 &&
+        _tens.containsKey(bits[0]) &&
+        _ones.containsKey(bits[1]) &&
+        _ones[bits[1]]! < 10) {
+      return _ReadInt(_tens[bits[0]]! + _ones[bits[1]]!, 1, first.suffix);
+    }
+  }
+  if (_tens.containsKey(first.word) && start + 1 < tokens.length) {
+    final next = _splitWord(tokens[start + 1]);
+    if (next != null && _ones.containsKey(next.word) && _ones[next.word]! < 10) {
+      return _ReadInt(
+        _tens[first.word]! + _ones[next.word]!,
+        2,
+        next.suffix,
+      );
+    }
+  }
+  if (_ones.containsKey(first.word)) {
+    return _ReadInt(_ones[first.word]!, 1, first.suffix);
+  }
+  if (_tens.containsKey(first.word)) {
+    return _ReadInt(_tens[first.word]!, 1, first.suffix);
+  }
+  return null;
 }
 
 String _imperial(String text) {
