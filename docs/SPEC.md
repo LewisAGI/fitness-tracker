@@ -47,6 +47,18 @@ Today (mic, today's plan, logged sessions, check-in status) · Plan (week grid +
 Use a rolling window of the last 8 occurrences so it tracks changes in fitness. It works from day 1 on defaults and becomes personal around week 4.
 **Evidence text** in the pop-out: "Last 3 times: Thai hard → legs heavy. Next-day fatigue 8, 7, 9." It shows the dates, and tapping a date opens that day.
 
+## Overload rule
+
+For each lift, per week. Working sets are the sets at the heaviest weight; bodyweight work is skipped. The rep range is 8–12 unless that lift already has a stored range. The step is +2.5 kg for an upper-body lift and +5 kg for a lower-body lift. Round the final suggested weight to the nearest 2.5 kg, and round an exact tie down (61.25 + 5 = 66.25 → 65, not 67.5). A low-readiness or strain flag takes precedence over a step-up.
+
+- All reps hit at the top of the range: step up.
+- All reps hit with RIR ≥ 2 on every set: step up, even below the top of the range. RIR outside 0–5 does not count.
+- Missed reps alone: keep the weight and aim for the reps.
+- Low readiness (mean &lt; 40) or a strain warning on the lift's muscles, with the reps hit: hold.
+- Missed reps and (low readiness or a strain warning): deload 10%, rounded to 2.5 kg.
+- Low readiness and a strain warning, with the reps hit: hold, not deload.
+- RIR 0 before the target reps: hold, unless the deload condition applies. RIR 0 after the reps were hit does not hold.
+
 ## Voice parser (deterministic)
 On-device STT: iOS `SFSpeechRecognizer` (`requiresOnDeviceRecognition`), Android `SpeechRecognizer` (offline preferred), via the `speech_to_text` plugin Shelf already uses, en-GB. Pipeline:
 1. Normalise: lowercase, number words → digits ("eight" → 8, "seventy" → 70), strip filler (reuse Shelf's cleanup), and map units "kilos/kg/k" → kg, "lbs/pounds" → lb→kg, "k/km" after a run → km.
