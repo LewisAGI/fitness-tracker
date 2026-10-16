@@ -5,6 +5,7 @@ import '../models/training.dart';
 import '../services/dates.dart';
 import '../theme/app_theme.dart';
 import '../widgets/icon_tip.dart';
+import '../widgets/set_log.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.store, this.initialDay});
@@ -159,38 +160,37 @@ class _HistoryScreenState extends State<HistoryScreen> {
     await showDialog<void>(
       context: context,
       builder: (context) => Dialog(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                fmtWeekdayDate(day),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              for (final session in bundle.sessions) ...[
-                Text(sessionLine(session)),
-                for (final block in session.blocks)
-                  Text(
-                    '${block.label ?? block.subtype} · ${block.durationMin == null ? '?' : '${block.durationMin} min'} · RPE ${block.rpe}',
-                  ),
-                const SizedBox(height: 6),
-              ],
-              if (bundle.morning != null)
-                Text('Morning · ${_checkLine(bundle.morning!)}'),
-              if (bundle.evening != null)
-                Text('Evening · ${_checkLine(bundle.evening!)}'),
-              Align(
-                alignment: Alignment.centerRight,
-                child: IconTip(
-                  icon: Icons.close,
-                  message: 'Close',
-                  onPressed: () => Navigator.pop(context),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  fmtWeekdayDate(day),
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                for (final session in bundle.sessions)
+                  SetLog(
+                    session: session,
+                    goals: widget.store.goals,
+                  ),
+                if (bundle.morning != null)
+                  Text('Morning · ${_checkLine(bundle.morning!)}'),
+                if (bundle.evening != null)
+                  Text('Evening · ${_checkLine(bundle.evening!)}'),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconTip(
+                    icon: Icons.close,
+                    message: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

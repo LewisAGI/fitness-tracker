@@ -90,6 +90,60 @@ void main() {
     final rirColumns = await upgraded.rawQuery('PRAGMA table_info(sets)');
     expect(rirColumns.where((column) => column['name'] == 'rir'), hasLength(1));
     expect(await upgraded.query('session_blocks'), hasLength(2));
+    final goals = await upgraded.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'goals'",
+    );
+    expect(goals, hasLength(1));
+    await upgraded.close();
+  });
+
+  test('v2 databases gain a goals table and keep existing sets', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    final directory = await Directory.systemTemp.createTemp('fitness-goals');
+    final path = '${directory.path}/v2.db';
+    final legacy = await openDatabase(
+      path,
+      version: 2,
+      onCreate: (db, version) async {
+        await db.execute(
+          'CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, type TEXT NOT NULL)',
+        );
+        await db.execute('''
+          CREATE TABLE sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            reps INTEGER,
+            rir INTEGER
+          )
+        ''');
+        await db.insert('sessions', {'date': '2026-10-05', 'type': 'gym'});
+        await db.insert('sets', {'session_id': 1, 'reps': 8, 'rir': 2});
+      },
+    );
+    await legacy.close();
+
+    final upgraded = await openFitnessDatabase(path: path);
+    final tables = await upgraded.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'goals'",
+    );
+    expect(tables, hasLength(1));
+    await upgraded.insert('goals', {
+      'kind': 'general',
+      'general': 'strength',
+      'created_on': '2026-10-05',
+    });
+    final set = await upgraded.query('sets');
+    expect(set.single['reps'], 8);
+    expect(set.single['rir'], 2);
+
+    await upgradeFitnessDatabase(upgraded, 2, 3);
+    final again = await upgraded.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'goals'",
+    );
+    expect(again, hasLength(1));
+    expect(await upgraded.query('goals'), hasLength(1));
+    expect((await upgraded.query('sets')).single['rir'], 2);
     await upgraded.close();
   });
 
@@ -100,7 +154,7 @@ void main() {
     final path = '${directory.path}/newer.db';
     final newer = await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {},
     );
     await newer.close();

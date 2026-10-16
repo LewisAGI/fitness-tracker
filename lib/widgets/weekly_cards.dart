@@ -22,17 +22,30 @@ class WeeklyCards extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 8),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.canvas,
-              border: Border.all(color: AppColors.hairline),
-              borderRadius: BorderRadius.circular(12),
+              color: AppColors.accentSoft,
+              borderRadius: BorderRadius.circular(22),
             ),
-            child: Text(
-              suggestion.card,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Row(
+              children: [
+                Icon(
+                  suggestion.suggestedWeightKg > suggestion.workingWeightKg
+                      ? Icons.arrow_upward
+                      : Icons.arrow_forward,
+                  color: AppColors.accent,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    suggestion.card,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
       ],

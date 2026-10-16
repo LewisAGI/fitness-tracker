@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:fitness_tracker/app.dart';
 import 'package:fitness_tracker/data/store.dart';
+import 'package:fitness_tracker/models/training.dart';
 import 'package:fitness_tracker/services/checkin_scheduler.dart';
 import 'package:fitness_tracker/services/speech_capture.dart';
 import 'package:fitness_tracker/services/voice_parser.dart';
@@ -48,6 +49,18 @@ void main() {
     await tester.pumpAndSettle();
     await _shoot(tester, boundary, 'today');
 
+    await tester.tap(find.byKey(const ValueKey('set-reps')));
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'set_picker');
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Finish'));
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'finish_sheet');
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byKey(const ValueKey('morning-status')));
     await tester.pumpAndSettle();
     await _shoot(tester, boundary, 'checkin_morning');
@@ -75,13 +88,55 @@ void main() {
     await tester.tap(find.byTooltip('Discard'));
     await tester.pumpAndSettle();
 
+    final bench = store.exerciseByName('Bench press')!;
+    await store.addGoal(kind: GoalKind.lift, exerciseId: bench.id, targetKg: 100);
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byKey(const ValueKey('tab-Plan')));
     await tester.pumpAndSettle();
     await _shoot(tester, boundary, 'plan_weekly_cards');
 
+    final planScroll = find.descendant(
+      of: find.byKey(const ValueKey('plan-list')),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('goal-ruler')),
+      200,
+      scrollable: planScroll,
+    );
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'plan_goal');
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('warning-2026-10-12')),
+      200,
+      scrollable: planScroll,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('warning-2026-10-12')));
     await tester.pumpAndSettle();
     await _shoot(tester, boundary, 'plan_warning');
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('period')),
+      -400,
+      scrollable: planScroll,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('period')));
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'plan_period');
+    await tester.tap(find.text('Week'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tab-Today')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('share')));
+    await tester.pumpAndSettle();
+    await _shoot(tester, boundary, 'share_deck');
     await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
 

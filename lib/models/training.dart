@@ -225,6 +225,43 @@ class StoredWarning {
   final List<String> evidenceDates;
 }
 
+enum GoalKind { pace, lift, general }
+
+GoalKind goalKindFrom(String raw) => switch (raw) {
+  'pace' => GoalKind.pace,
+  'lift' => GoalKind.lift,
+  'general' => GoalKind.general,
+  _ => GoalKind.general,
+};
+
+class Goal {
+  const Goal({
+    this.id = 0,
+    required this.kind,
+    this.general,
+    this.exerciseId,
+    this.exerciseName,
+    this.targetKg,
+    this.distanceKm,
+    this.targetPaceS,
+    required this.createdOn,
+  });
+
+  final int id;
+  final GoalKind kind;
+
+  /// `strength`, `fitness`, or `hypertrophy` when [kind] is [GoalKind.general].
+  final String? general;
+  final int? exerciseId;
+  final String? exerciseName;
+  final double? targetKg;
+  final double? distanceKm;
+
+  /// Target pace in seconds per kilometre.
+  final int? targetPaceS;
+  final String createdOn;
+}
+
 class StoredSuggestion {
   const StoredSuggestion({
     this.id = 0,

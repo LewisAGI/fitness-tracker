@@ -7,8 +7,8 @@ import '../data/store.dart';
 import '../models/training.dart';
 import '../services/checkin_scheduler.dart';
 import '../services/dates.dart';
-import '../services/share_export.dart';
 import '../theme/app_theme.dart';
+import '../widgets/goals_editor.dart';
 import '../widgets/icon_tip.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -86,21 +86,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _export(String kind) async {
-    final today = dateOnly(widget.store.now());
-    final start = kind == 'week'
-        ? weekStart(today)
-        : DateTime(today.year, today.month);
-    final end = kind == 'week'
-        ? start.add(const Duration(days: 6))
-        : DateTime(today.year, today.month + 1, 0);
-    final files = await widget.store.exportRange(start: start, end: end, kind: kind);
-    if (!mounted) {
-      return;
-    }
-    await shareExport(context, files);
-  }
-
   Future<void> _import() async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -133,14 +118,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Settings'),
         actions: [
           IconTip(
-            icon: Icons.calendar_view_week,
-            message: 'Export week',
-            onPressed: () => _export('week'),
-          ),
-          IconTip(
-            icon: Icons.calendar_month,
-            message: 'Export month',
-            onPressed: () => _export('month'),
+            icon: Icons.track_changes,
+            message: 'Goals',
+            onPressed: () => showGoalsEditor(context, widget.store),
           ),
           IconTip(
             icon: Icons.file_download_outlined,

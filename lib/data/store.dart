@@ -5,10 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../models/training.dart';
+import '../services/balance.dart';
 import '../services/checkin_scheduler.dart';
 import '../services/dates.dart';
 import '../services/export_summary.dart';
+import '../services/goals.dart';
 import '../services/load_model.dart';
+import '../services/week_chart.dart';
 import '../services/overload.dart';
 import '../services/patterns.dart';
 import '../services/readiness.dart';
@@ -40,11 +43,15 @@ class WeekBundle {
     required this.start,
     required this.days,
     required this.suggestions,
+    required this.balance,
+    required this.goalLines,
   });
 
   final DateTime start;
   final List<DayBundle> days;
   final List<StoredSuggestion> suggestions;
+  final BalanceReport balance;
+  final List<String> goalLines;
 }
 
 class Store extends ChangeNotifier {
@@ -55,6 +62,7 @@ class Store extends ChangeNotifier {
 
   Database? _db;
   List<Exercise> exercises = [];
+  List<Goal> goals = [];
   CheckInSchedule schedule = CheckInSchedule.defaults;
   int roundMinutes = 3;
   var notificationsDenied = false;
@@ -112,6 +120,7 @@ class Store extends ChangeNotifier {
   Future<void> init({String? path}) async {
     _db = await openFitnessDatabase(path: path);
     exercises = await _readExercises();
+    goals = await _readGoals();
     schedule = await _readSchedule();
     roundMinutes = int.tryParse(await _setting('round_minutes') ?? '') ?? 3;
     notificationsDenied = (await _setting('notifications_denied') ?? '0') == '1';
@@ -184,6 +193,199 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> addGoal({
+    required GoalKind kind,
+    String? general,
+    int? exerciseId,
+    double? targetKg,
+    double? distanceKm,
+    int? targetPaceS,
+  }) async {
+    await db.insert('goals', {
+      'kind': kind.name,
+      'general': general,
+      'exercise_id': exerciseId,
+      'target_kg': targetKg,
+      'distance_km': distanceKm,
+      'target_pace_s': targetPaceS,
+      'created_on': isoDate(now()),
+    });
+    goals = await _readGoals();
+    notifyListeners();
+  }
+
+  Future<void> deleteGoal(int id) async {
+    await db.delete('goals', where: 'id = ?', whereArgs: [id]);
+    goals = await _readGoals();
+    notifyListeners();
+  }
+
+  Future<void> updateGoalTarget(int id, double kg) async {
+    await db.update(
+      'goals',
+      {'target_kg': kg},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    goals = await _readGoals();
+    notifyListeners();
+  }
+
+  Future<void> updateSet({
+    required int id,
+    int? setCount,
+    int? reps,
+    double? weightKg,
+  }) async {
+    final values = <String, Object?>{};
+    if (setCount != null) {
+      values['set_count'] = setCount < 1 ? 1 : setCount;
+    }
+    if (reps != null) {
+      values['reps'] = reps;
+    }
+    if (weightKg != null) {
+      values['weight_kg'] = weightKg;
+    }
+    if (values.isEmpty) {
+      return;
+    }
+    await db.update('sets', values, where: 'id = ?', whereArgs: [id]);
+    notifyListeners();
+  }
+
+  Future<void> setSessionRpe(int id, int rpe) async {
+    final clamped = rpe < 1 ? 1 : (rpe > 10 ? 10 : rpe);
+    await db.update(
+      'sessions',
+      {'rpe': clamped},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    notifyListeners();
+  }
+
+  Future<LoadSeries> loadSeries(ChartPeriod period) {
+    return _track(_serial(() => _loadSeries(period)));
+  }
+
+  Future<LoadSeries> _loadSeries(ChartPeriod period) async {
+    final today = dateOnly(now());
+    return switch (period) {
+      ChartPeriod.day => _daySeries(today),
+      ChartPeriod.week => _weekSeries(today),
+      ChartPeriod.threeMonths => _spanSeries(today, weeks: 13, title: '3 months'),
+      ChartPeriod.year => _yearSeries(today),
+    };
+  }
+
+  Future<LoadSeries> _daySeries(DateTime today) async {
+    final total = _sumLoads(await _sessionsBetween(isoDate(today), isoDate(today)));
+    final priors = <double>[];
+    for (var i = 1; i <= 12 && priors.length < 4; i++) {
+      final day = today.subtract(Duration(days: 7 * i));
+      final load = _sumLoads(await _sessionsBetween(isoDate(day), isoDate(day)));
+      if (load > 0) {
+        priors.add(load);
+      }
+    }
+    return seriesFrom(
+      title: 'Today',
+      points: [total],
+      labels: [weekdayLabels[today.weekday - 1].substring(0, 1)],
+      priorTotals: priors.reversed.toList(),
+    );
+  }
+
+  Future<LoadSeries> _weekSeries(DateTime today) async {
+    final start = weekStart(today);
+    final points = <double>[];
+    final labels = <String>[];
+    for (var i = 0; i < 7; i++) {
+      final day = start.add(Duration(days: i));
+      points.add(_sumLoads(await _sessionsBetween(isoDate(day), isoDate(day))));
+      labels.add(weekdayLabels[i].substring(0, 1));
+    }
+    final priors = <double>[];
+    for (var i = 1; i <= 12 && priors.length < 4; i++) {
+      final from = start.subtract(Duration(days: 7 * i));
+      final to = from.add(const Duration(days: 6));
+      final load = _sumLoads(await _sessionsBetween(isoDate(from), isoDate(to)));
+      if (load > 0) {
+        priors.add(load);
+      }
+    }
+    return seriesFrom(
+      title: 'This week',
+      points: points,
+      labels: labels,
+      priorTotals: priors.reversed.toList(),
+    );
+  }
+
+  Future<LoadSeries> _spanSeries(
+    DateTime today, {
+    required int weeks,
+    required String title,
+  }) async {
+    final end = weekStart(today);
+    final start = end.subtract(Duration(days: 7 * (weeks - 1)));
+    final sessions = await _sessionsBetween(
+      isoDate(start),
+      isoDate(end.add(const Duration(days: 6))),
+    );
+    final points = <double>[];
+    final labels = <String>[];
+    for (var i = 0; i < weeks; i++) {
+      final from = start.add(Duration(days: 7 * i));
+      final to = from.add(const Duration(days: 6));
+      var load = 0.0;
+      for (final session in sessions) {
+        final day = parseIsoDate(session.date);
+        if (!day.isBefore(from) && !day.isAfter(to)) {
+          load += loadOf(session);
+        }
+      }
+      points.add(load);
+      labels.add('${from.day}');
+    }
+    final priors = <double>[];
+    for (var i = 4; i >= 1; i--) {
+      final from = start.subtract(Duration(days: 7 * weeks * i));
+      final to = from.add(Duration(days: 7 * weeks - 1));
+      priors.add(_sumLoads(await _sessionsBetween(isoDate(from), isoDate(to))));
+    }
+    return seriesFrom(
+      title: title,
+      points: points,
+      labels: labels,
+      priorTotals: priors,
+    );
+  }
+
+  Future<LoadSeries> _yearSeries(DateTime today) async {
+    final sessions = await _sessionsBetween(
+      isoDate(DateTime(today.year)),
+      isoDate(DateTime(today.year, 12, 31)),
+    );
+    final points = List<double>.filled(12, 0);
+    for (final session in sessions) {
+      points[parseIsoDate(session.date).month - 1] += loadOf(session);
+    }
+    final previous = _sumLoads(
+      await _sessionsBetween(
+        isoDate(DateTime(today.year - 1)),
+        isoDate(DateTime(today.year - 1, 12, 31)),
+      ),
+    );
+    return seriesFrom(
+      title: 'This year',
+      points: points,
+      labels: [for (final month in monthLabels) month.substring(0, 1)],
+      priorTotals: [previous],
+    );
+  }
+
   Future<void> setRoundMinutes(int minutes) async {
     final next = minutes < 1 ? 1 : minutes;
     roundMinutes = next;
@@ -229,7 +431,17 @@ class Store extends ChangeNotifier {
       days.add(await _readDay(start.add(Duration(days: i))));
     }
     final suggestions = await suggestionsForWeek(isoDate(start.subtract(const Duration(days: 7))));
-    return WeekBundle(start: start, days: days, suggestions: suggestions);
+    final sessions = [for (final day in days) ...day.sessions];
+    final weekEnd = start.add(const Duration(days: 6));
+    final goalRows = await _readGoals();
+    goals = goalRows;
+    return WeekBundle(
+      start: start,
+      days: days,
+      suggestions: suggestions,
+      balance: buildBalance(start: start, end: weekEnd, sessions: sessions),
+      goalLines: goalProgressLines(goalRows, sessions),
+    );
   }
 
   Future<Set<String>> markedDays(DateTime month) {
@@ -612,6 +824,7 @@ class Store extends ChangeNotifier {
         groups[id] = exercise.muscleGroups;
       }
     }
+    final bias = shapingBias(await _readGoals());
     final suggestions = suggestWeek(
       lifts: [
         for (final entry in grouped.entries)
@@ -627,6 +840,7 @@ class Store extends ChangeNotifier {
       context: WeekContext(
         meanReadiness: meanReadiness(scores.values.map((score) => score.readiness)),
         warnedMuscles: muscles,
+        bias: bias,
       ),
     );
     await db.delete(
@@ -656,12 +870,26 @@ class Store extends ChangeNotifier {
     );
   }
 
+  Future<ExportFiles> exportSession(Session session) {
+    final day = parseIsoDate(session.date);
+    return exportRange(
+      start: day,
+      end: day,
+      kind: 'workout',
+      sessionId: session.id,
+    );
+  }
+
   Future<ExportFiles> exportRange({
     required DateTime start,
     required DateTime end,
     required String kind,
+    int? sessionId,
   }) async {
     final sessions = await _sessionsBetween(isoDate(start), isoDate(end));
+    final exported = sessionId == null
+        ? sessions
+        : sessions.where((session) => session.id == sessionId).toList();
     final plans = await _plansBetween(isoDate(start), isoDate(end));
     final checkins = await _checkInsBetween(isoDate(start), isoDate(end));
     final warnings = await _warningsBetween(isoDate(start), isoDate(end));
@@ -679,12 +907,13 @@ class Store extends ChangeNotifier {
         kind: kind,
         start: start,
         end: end,
-        sessions: sessions,
+        sessions: exported,
         plans: plans,
         checkins: checkins,
         warnings: warnings,
         patterns: await patterns(),
         suggestions: suggestionRows.map(_suggestion).toList(),
+        goals: await _readGoals(),
         readinessByDay: {
           for (final entry in scores.entries) entry.key: entry.value.readiness,
         },
@@ -1072,6 +1301,24 @@ class Store extends ChangeNotifier {
     ];
   }
 
+  Future<List<Goal>> _readGoals() async {
+    final rows = await db.query('goals', orderBy: 'id');
+    return [
+      for (final row in rows)
+        Goal(
+          id: row['id'] as int,
+          kind: goalKindFrom(row['kind'] as String),
+          general: row['general'] as String?,
+          exerciseId: row['exercise_id'] as int?,
+          exerciseName: exerciseById(row['exercise_id'] as int?)?.name,
+          targetKg: (row['target_kg'] as num?)?.toDouble(),
+          distanceKm: (row['distance_km'] as num?)?.toDouble(),
+          targetPaceS: row['target_pace_s'] as int?,
+          createdOn: row['created_on'] as String,
+        ),
+    ];
+  }
+
   Future<CheckInSchedule> _readSchedule() async {
     final morning = await _setting('morning_hm') ?? '08:00';
     final evening = await _setting('evening_hm') ?? '21:00';
@@ -1291,6 +1538,10 @@ class Store extends ChangeNotifier {
       muscleGroups: decodeStrings(row['muscle_groups'] as String?),
     );
   }
+}
+
+double _sumLoads(List<Session> sessions) {
+  return sessions.fold<double>(0, (sum, session) => sum + loadOf(session));
 }
 
 double loadOf(Session session) {

@@ -10,6 +10,7 @@ class IconTip extends StatelessWidget {
     this.onPressed,
     this.color,
     this.size = 24,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -17,6 +18,7 @@ class IconTip extends StatelessWidget {
   final VoidCallback? onPressed;
   final Color? color;
   final double size;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -24,6 +26,11 @@ class IconTip extends StatelessWidget {
       message: message,
       child: IconButton(
         onPressed: onPressed,
+        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        padding: compact ? EdgeInsets.zero : null,
+        constraints: compact
+            ? const BoxConstraints(minWidth: 32, minHeight: 32)
+            : null,
         icon: Icon(icon, color: color ?? AppColors.accent, size: size),
       ),
     );

@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import '../data/store.dart';
 import '../models/training.dart';
 import '../services/dates.dart';
-import '../services/share_export.dart';
 import '../services/speech_capture.dart';
 import '../services/voice_log_flow.dart';
 import '../services/voice_parser.dart';
 import '../theme/app_theme.dart';
 import '../widgets/confirm_action.dart';
 import '../widgets/confirm_card.dart';
-import '../widgets/icon_tip.dart';
+import '../widgets/rest_pill.dart';
+import '../widgets/set_log.dart';
+import '../widgets/share_deck.dart';
 import 'checkin_screen.dart';
 
 class TodayScreen extends StatefulWidget {
@@ -127,23 +128,6 @@ class _TodayScreenState extends State<TodayScreen> {
     await widget.store.deleteSession(session.id);
   }
 
-  Future<void> _export(String kind) async {
-    final today = dateOnly(widget.store.now());
-    final start = kind == 'week' ? weekStart(today) : DateTime(today.year, today.month);
-    final end = kind == 'week'
-        ? start.add(const Duration(days: 6))
-        : DateTime(today.year, today.month + 1, 0);
-    final files = await widget.store.exportRange(
-      start: start,
-      end: end,
-      kind: kind,
-    );
-    if (!mounted) {
-      return;
-    }
-    await shareExport(context, files);
-  }
-
   void _openCheckIn(String slot) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -164,22 +148,39 @@ class _TodayScreenState extends State<TodayScreen> {
       appBar: AppBar(
         title: const Text('Today'),
         actions: [
-          PopupMenuButton<String>(
-            tooltip: 'Export',
-            onSelected: _export,
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'week', child: Text('Week')),
-              PopupMenuItem(value: 'month', child: Text('Month')),
-            ],
+          Tooltip(
+            message: 'Log',
+            child: GestureDetector(
+              key: const ValueKey('mic'),
+              onLongPressStart: (_) => _holdStart(),
+              onLongPressEnd: (_) => _holdEnd(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Icon(
+                  Icons.mic,
+                  color: _listening ? AppColors.accentPressed : AppColors.accent,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('share'),
+            tooltip: 'Share',
+            onPressed: () => showShareDeck(context, widget.store),
+            icon: const Icon(Icons.ios_share),
           ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 120),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
         children: [
           Text(
             fmtWeekdayDate(today),
-            style: const TextStyle(fontSize: 16, color: AppColors.muted),
+            style: const TextStyle(
+              fontSize: 16,
+              color: AppColors.muted,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const SizedBox(height: 12),
           Row(
@@ -219,70 +220,17 @@ class _TodayScreenState extends State<TodayScreen> {
               ),
           if (day != null)
             for (final session in day.sessions)
-              Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.hairline),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            sessionLine(session),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        IconTip(
-                          icon: Icons.edit_outlined,
-                          message: 'Edit',
-                          onPressed: () => _edit(session),
-                        ),
-                        IconTip(
-                          icon: Icons.delete_outline,
-                          message: 'Delete',
-                          onPressed: () => _delete(session),
-                        ),
-                      ],
-                    ),
-                    for (final block in session.blocks)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '${block.label ?? _block(block.subtype)} · ${block.durationMin == null ? '?' : '${block.durationMin} min'} · RPE ${block.rpe}',
-                        ),
-                      ),
-                  ],
-                ),
+              SetLog(
+                session: session,
+                goals: widget.store.goals,
+                store: widget.store,
+                onEdit: () => _edit(session),
+                onDelete: () => _delete(session),
               ),
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: Tooltip(
-        message: 'Log',
-        child: GestureDetector(
-          key: const ValueKey('mic'),
-          onLongPressStart: (_) => _holdStart(),
-          onLongPressEnd: (_) => _holdEnd(),
-          child: Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: _listening ? AppColors.accentPressed : AppColors.accent,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.mic, color: Colors.white, size: 32),
-          ),
-        ),
-      ),
+      floatingActionButton: const RestPill(),
     );
   }
 
@@ -307,13 +255,3 @@ class _TodayScreenState extends State<TodayScreen> {
     );
   }
 }
-
-String _block(String subtype) => switch (subtype) {
-  'technique' => 'Technique',
-  'pads' => 'Pads',
-  'clinch' => 'Clinch',
-  'sparring' => 'Sparring',
-  'conditioning' => 'Conditioning',
-  'other' => 'Other',
-  _ => subtype,
-};
