@@ -24,7 +24,10 @@ bool confirmNeedsReview(ParseResult result) {
           set.loadFlagged ||
           set.heavy ||
           set.rejected ||
-          set.summary.contains('?')) {
+          set.summary.contains('?') ||
+          _implausibleScheme(set) ||
+          _emptyStrength(set) ||
+          _setsWithoutReps(set)) {
         return true;
       }
     }
@@ -40,6 +43,104 @@ bool confirmNeedsReview(ParseResult result) {
     }
   }
   return false;
+}
+
+bool _implausibleScheme(ParsedSet set) {
+  if (_overlongTimedHold(set)) {
+    return true;
+  }
+  if (set.bodyweight && _repsAreTheTime(set)) {
+    return false;
+  }
+  final sets = set.sets;
+  final reps = set.reps;
+  return (sets != null && sets > 20) || (reps != null && reps > 100);
+}
+
+/// The scheme duration ("120 seconds"), after rest text is removed.
+/// A rest of the same number, or a separate "for 10 minutes", does not count.
+int? _schemeDurationSeconds(ParsedSet set) {
+  final reps = set.reps;
+  final notes = set.notes;
+  if (reps == null || notes == null || notes.isEmpty) {
+    return null;
+  }
+  final match = RegExp(
+    '(?<!for )\\b$reps\\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\\b',
+  ).firstMatch(_withoutRest(notes));
+  if (match == null) {
+    return null;
+  }
+  final unit = match.group(1)!;
+  if (unit.startsWith('h')) {
+    return reps * 3600;
+  }
+  if (unit.startsWith('m')) {
+    return reps * 60;
+  }
+  return reps;
+}
+
+bool _repsAreTheTime(ParsedSet set) => _schemeDurationSeconds(set) != null;
+
+/// A timed hold longer than 10 minutes waits.
+bool _overlongTimedHold(ParsedSet set) {
+  if (!set.bodyweight) {
+    return false;
+  }
+  final seconds = _schemeDurationSeconds(set);
+  return seconds != null && seconds > 600;
+}
+
+/// Sets were spoken and the reps were not. A bodyweight duration is the work.
+bool _setsWithoutReps(ParsedSet set) {
+  if (set.category != 'strength' || set.sets == null || set.reps != null) {
+    return false;
+  }
+  if (set.bodyweight && _hasDuration(set.notes)) {
+    return false;
+  }
+  return true;
+}
+
+bool _emptyStrength(ParsedSet set) {
+  final timedHold = set.bodyweight && _hasDuration(set.notes);
+  final namedBodyweight = set.explicitBodyweight && set.bodyweight;
+  final spokenTimed = namedBodyweight && _hasDuration(set.notes);
+  return set.category == 'strength' &&
+      set.sets == null &&
+      set.reps == null &&
+      set.weightKg == null &&
+      !timedHold &&
+      !spokenTimed;
+}
+
+bool _hasDuration(String? notes) {
+  if (notes == null || notes.isEmpty) {
+    return false;
+  }
+  final held = _withoutRest(notes);
+  return RegExp(
+    r'\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\b',
+  ).hasMatch(held);
+}
+
+String _withoutRest(String notes) {
+  var held = notes;
+  held = held.replaceAll(
+    RegExp(
+      r'\b(?:rested|rest|break)\s+\d+(?:\.\d+)?(?:\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?))?',
+    ),
+    ' ',
+  );
+  held = held.replaceAll(
+    RegExp(
+      r'\b(?:for\s+)?\d+(?:\.\d+)?\s*(?:seconds?|minutes?|secs?|mins?|hours?|hrs?)\s+(?:rested|rest|break)\b',
+    ),
+    ' ',
+  );
+  held = held.replaceAll(RegExp(r'\b(?:rested|rest|break)\b'), ' ');
+  return held;
 }
 
 class ConfirmCard extends StatefulWidget {

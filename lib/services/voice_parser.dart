@@ -73,6 +73,8 @@ class ParsedSet {
     this.loadFlagged = false,
     this.heavy = false,
     this.rejected = false,
+    this.explicitBodyweight = false,
+    this.notes,
   });
 
   int? exerciseId;
@@ -94,6 +96,8 @@ class ParsedSet {
   bool loadFlagged;
   bool heavy;
   bool rejected;
+  bool explicitBodyweight;
+  String? notes;
 
   String get summary {
     final name = unmatched || exerciseName == null ? '?' : exerciseName!;
@@ -113,6 +117,9 @@ class ParsedSet {
         return '$core · ?';
       }
       return load == null ? core : '$core · $load';
+    }
+    if (loadFlagged) {
+      return '$name · ?';
     }
     if (load != null) {
       return '$name · $load';
@@ -184,6 +191,8 @@ class ParsedSession {
   final List<ParsedBlock> blocks;
   String raw;
   String? notes;
+
+  final List<_PendingRest> _pendingRests = [];
 
   String get summary {
     if (ambiguous && sets.isEmpty) {
@@ -322,7 +331,9 @@ class VoiceParser {
       }
     }
     final sessions = _mergeGym(_attachRestOnly(parsed));
+    _applyPendingRests(sessions);
     for (final session in sessions) {
+      _publishSetRestNotes(session);
       session.raw = spoken;
     }
     return ParseResult(
@@ -335,16 +346,20 @@ class VoiceParser {
 
   ParsedSession _parseEntry(String text, Exercise? lastExercise) {
     final original = text;
-    final noted = _pullRest(text);
+    // Pull "for N minutes" before a rest, so "for 2 minutes rest 90"
+    // cannot be read as the scheme "60 for 90".
+    final ahead = _pullForDuration(text);
+    final noted = _pullRest(ahead.text);
     if (noted.text.isEmpty) {
       return ParsedSession(
         type: 'other',
-        notes: noted.notes,
+        notes: _joinNotes(ahead.notes, noted.notes),
         raw: original,
-        ambiguous: RegExp(r'\b(?:rest|rested|break)\b').hasMatch(original),
       );
     }
-    text = noted.text;
+    text = ahead.notes == null
+        ? noted.text
+        : '${noted.text} ${ahead.notes}'.replaceAll(RegExp(r'\s+'), ' ').trim();
     final durationAmbiguous = _ambiguousAmount(
       text,
       'minutes|mins|min|hours|hour|hrs|hr',
@@ -448,7 +463,13 @@ class VoiceParser {
 
     final timed = _pullForDuration(text);
     text = timed.text;
-    final liftNotes = _joinNotes(noted.notes, timed.notes);
+    final schemeNote = _schemeDuration(text);
+    final loose = _pullSpokenBodyweightDuration(text);
+    text = loose.text;
+    final liftNotes = _joinNotes(
+      _joinNotes(_joinNotes(noted.notes, timed.notes), loose.notes),
+      schemeNote,
+    );
     final slots = _strengthSlots(text);
     final stray = _strayDigits(text);
     Exercise? exercise = match?.exercise;
@@ -510,6 +531,8 @@ class VoiceParser {
           loadFlagged: stolen || (stray ? false : load.flagged),
           heavy: load.weightKg != null && load.weightKg! > 300,
           rejected: rejected,
+          explicitBodyweight: RegExp(r'\b(?:body\s*weight|bw)\b').hasMatch(text),
+          notes: liftNotes,
         ),
       ],
     );
@@ -669,6 +692,9 @@ class VoiceParser {
       if (word == 'for' && _forDurationBelongsToLift(text)) {
         continue;
       }
+      if (_isBodyweightWord(word, text, match.start)) {
+        continue;
+      }
       if (_hasExactExercise(exercises, word)) {
         continue;
       }
@@ -772,7 +798,7 @@ class VoiceParser {
   }
 
   bool _isContinuation(String text) {
-    if (_startsEntry(text)) {
+    if (_isRestFragment(text) || _startsEntry(text)) {
       return false;
     }
     final stripped = text
@@ -812,6 +838,9 @@ class VoiceParser {
     }
     final word = match.group(1)!;
     if (_subtypeIn(word) != null || _blockedActivity(word)) {
+      return false;
+    }
+    if (_isBodyweightWord(word, text, match.start)) {
       return false;
     }
     return !_hasExactExercise(exercises, word);
@@ -1092,10 +1121,10 @@ _Noted _pullRest(String text) {
       '\\b(?:rested|rest|break)\\s+\\d+(?:\\.\\d+)?(?:\\s+(?:$_restTimeUnit))?(?!\\s*(?:x|×|by)\\s*\\d)(?!\\s+(?:sets?|reps?|x|by)\\b)',
     ),
     RegExp(
-      '\\b[1-9]\\s+(?:1[0-9]|[2-9]\\d)\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break))?\\b',
+      '\\b[1-9]\\s+(?:1[0-9]|[2-9]\\d)\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break)(?!\\s+\\d))?\\b',
     ),
     RegExp(
-      '\\b\\d+(?:\\.\\d+)?\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break))?\\b',
+      '\\b\\d+(?:\\.\\d+)?\\s+(?:seconds?|secs?)(?:\\s+(?:rest|break)(?!\\s+\\d))?\\b',
     ),
     RegExp(
       '\\b\\d+(?:\\.\\d+)?\\s+(?:minutes?|mins?)\\s+(?:rest|break)\\b',
@@ -1150,6 +1179,52 @@ _Noted _pullRest(String text) {
     match: match,
     note: '${match.group(1)} ${minutes * 60 + seconds} seconds',
   );
+}
+
+/// "3x120 seconds" is a timed hold, not 120 reps.
+String? _schemeDuration(String text) {
+  final match = RegExp(
+    r'\b\d+\s*(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)\b',
+  ).firstMatch(text);
+  if (match == null) {
+    return null;
+  }
+  return '${match.group(1)} ${match.group(2)}';
+}
+
+/// "bodyweight 2 minutes" beside a scheme is a note, not a second session.
+_Noted _pullSpokenBodyweightDuration(String text) {
+  final spoken = RegExp(r'\b(?:body\s*weight|bw)\b').hasMatch(text);
+  final scheme = RegExp(r'\b\d+\s*(?:x|×|by)\s*\d+\b').hasMatch(text);
+  if (!spoken || !scheme) {
+    return _Noted(text, null);
+  }
+  final pattern = RegExp(
+    r'\b(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?)\b',
+  );
+  for (final match in pattern.allMatches(text)) {
+    final prior = text.substring(0, match.start);
+    if (RegExp(r'\b\d+\s*(?:x|×|by)\s*$').hasMatch(prior)) {
+      continue;
+    }
+    final current =
+        '${text.substring(0, match.start)} ${text.substring(match.end)}';
+    return _Noted(
+      current.replaceAll(RegExp(r'\s+'), ' ').trim(),
+      match.group(0),
+    );
+  }
+  return _Noted(text, null);
+}
+
+bool _isBodyweightWord(String word, String text, int start) {
+  if (word == 'bodyweight' || word == 'bw') {
+    return true;
+  }
+  if (word != 'weight' || start == 0) {
+    return false;
+  }
+  return RegExp(r'\bbody\s+$').hasMatch(text.substring(0, start));
 }
 
 _Noted _pullForDuration(String text) {
@@ -1279,7 +1354,11 @@ _Load _resolveLoad(
     if (slots.weightKg != null) {
       return const _Load(flagged: true);
     }
-    return const _Load(bodyweight: true);
+    final spokenScheme =
+        slots.bodyweight && slots.sets != null && slots.reps != null;
+    if (!spokenScheme) {
+      return const _Load(bodyweight: true);
+    }
   }
   if (plus != null && slots.weightKg != null && (slots.weightKg! - plus).abs() > 0.001) {
     return _Load(weightKg: slots.weightKg! + plus);
@@ -1288,10 +1367,40 @@ _Load _resolveLoad(
     return const _Load(flagged: true);
   }
   final weight = slots.weightKg;
-  return _Load(
-    weightKg: weight,
-    bodyweight: slots.bodyweight && weight == null,
-  );
+  if (slots.bodyweight && weight == null) {
+    if (_bodyweightCapable(exercise) &&
+        slots.sets != null &&
+        slots.reps != null) {
+      return const _Load(bodyweight: true);
+    }
+    return const _Load(flagged: true);
+  }
+  return _Load(weightKg: weight);
+}
+
+/// Seed bodyweight moves, plus squats, lunges, step-ups, hip thrusts,
+/// and calf raises. The seed flag stays false on those last names so a
+/// bare number is still kilograms.
+bool _bodyweightCapable(Exercise? exercise) {
+  if (exercise == null) {
+    return false;
+  }
+  if (exercise.bodyweight) {
+    return true;
+  }
+  const names = {
+    'Back squat',
+    'Front squat',
+    'Goblet squat',
+    'Bulgarian split squat',
+    'Lunge',
+    'Walking lunge',
+    'Step-up',
+    'Hip thrust',
+    'Calf raise',
+    'Seated calf raise',
+  };
+  return names.contains(exercise.name);
 }
 
 double? _plusAmount(String text) {
@@ -1336,6 +1445,7 @@ bool _strayDigits(String text) {
   rest = rest.replaceAll(RegExp(r'\b\d+\s*sets?\s+of\s+\d+\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+reps?\s+\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\s+\d+\s+reps?\b'), ' ');
+  rest = rest.replaceAll(RegExp(r'\b\d+\s+sets?\b'), ' ');
   rest = rest.replaceAll(RegExp(r'\b\d+\s+for\s+\d+\b'), ' ');
   rest = _pullRest(rest).text;
   rest = rest.replaceAll(
@@ -1553,6 +1663,11 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     } else if (by != null) {
       sets = int.parse(by.group(1)!);
       reps = int.parse(by.group(2)!);
+    } else {
+      final bareSets = RegExp(r'\b(\d+)\s+sets?\b').firstMatch(text);
+      if (bareSets != null) {
+        sets = int.parse(bareSets.group(1)!);
+      }
     }
     double? weight;
     final atKg = RegExp(
@@ -1591,30 +1706,170 @@ _ExerciseHit? _matchExercise(List<Exercise> exercises, String text) {
     );
   }
 
-/// A rest-only piece is not its own session. It joins the neighbouring gym
-/// set, or stays as one held card when the utterance is only rest.
+/// A rest-only piece is not its own session. The note goes on the
+/// neighbouring set. A rest before a run or hike stays on that session,
+/// or as one held card when nothing precedes it.
 List<ParsedSession> _attachRestOnly(List<ParsedSession> items) {
   final kept = <ParsedSession>[];
   String? pending;
-  for (final item in items) {
+  for (var i = 0; i < items.length; i++) {
+    final item = items[i];
     if (_isRestOnly(item)) {
       pending = _joinNotes(pending, item.notes);
       continue;
     }
     if (pending != null && item.type == 'gym') {
-      item.notes = _joinNotes(pending, item.notes);
+      if (kept.isNotEmpty && kept.last.type == 'gym') {
+        _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
+        pending = null;
+        kept.add(item);
+        continue;
+      }
+      final run = <ParsedSession>[item];
+      var j = i + 1;
+      while (j < items.length && items[j].type == 'gym') {
+        run.add(items[j]);
+        j++;
+      }
+      i = j - 1;
+      final merged = run.length == 1 ? item : _mergeGym(run).single;
+      _giveRestNote(merged, pending, leading: true);
       pending = null;
-    } else {
+      kept.add(merged);
+      continue;
+    }
+    if (pending != null) {
+      if (kept.isNotEmpty) {
+        _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
+      } else {
+        kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
+      }
       pending = null;
     }
     kept.add(item);
   }
-  if (pending != null && kept.isNotEmpty && kept.last.type == 'gym') {
-    kept.last.notes = _joinNotes(kept.last.notes, pending);
-  } else if (pending != null && kept.isEmpty) {
+  if (pending != null && kept.isNotEmpty) {
+    _giveRestNote(_collapseTrailingGym(kept), pending, leading: false);
+  } else if (pending != null) {
     kept.add(ParsedSession(type: 'other', notes: pending, ambiguous: true));
   }
   return kept;
+}
+
+/// A trailing rest follows the last lift, which may already be several
+/// gym entries. Merge that tail so the note lands on the last set.
+ParsedSession _collapseTrailingGym(List<ParsedSession> kept) {
+  var start = kept.length - 1;
+  while (start > 0 &&
+      kept[start].type == 'gym' &&
+      kept[start - 1].type == 'gym') {
+    start--;
+  }
+  if (start == kept.length - 1) {
+    return kept.last;
+  }
+  final merged = _mergeGym(kept.sublist(start)).single;
+  kept.removeRange(start, kept.length);
+  kept.add(merged);
+  return merged;
+}
+
+void _publishSetRestNotes(ParsedSession session) {
+  for (var index = 0; index < session.sets.length; index++) {
+    final set = session.sets[index];
+    final note = set.notes;
+    final name = set.exerciseName;
+    if (note == null || note.isEmpty || name == null) {
+      continue;
+    }
+    final parts = [
+      for (final part in note.split('; '))
+        if (RegExp(r'\b(?:rest|rested|break)\b').hasMatch(part)) part,
+    ];
+    if (parts.isEmpty) {
+      continue;
+    }
+    final label = _restLabel(session, set, index);
+    var current = session.notes ?? '';
+    for (final part in parts) {
+      current = _dropExact(current, part);
+      final line = '$label: $part';
+      if (current.split('; ').contains(line)) {
+        continue;
+      }
+      current = current.isEmpty ? line : '${_dropExact(current, line)}; $line';
+    }
+    session.notes = current.isEmpty ? null : current;
+  }
+}
+
+String _restLabel(ParsedSession session, ParsedSet set, int index) {
+  final base = set.spoken.trim().isEmpty
+      ? (set.exerciseName ?? '').toLowerCase()
+      : set.spoken.trim().toLowerCase();
+  var copies = 0;
+  var sameScheme = 0;
+  for (final other in session.sets) {
+    final otherBase = other.spoken.trim().isEmpty
+        ? (other.exerciseName ?? '').toLowerCase()
+        : other.spoken.trim().toLowerCase();
+    if (otherBase != base) {
+      continue;
+    }
+    copies++;
+    if (other.sets == set.sets && other.reps == set.reps) {
+      sameScheme++;
+    }
+  }
+  if (copies < 2) {
+    return base;
+  }
+  if (set.sets != null && set.reps != null && sameScheme < 2) {
+    return '$base ${set.sets}x${set.reps}';
+  }
+  return '$base set ${index + 1}';
+}
+
+String _dropExact(String notes, String part) {
+  final kept = [
+    for (final item in notes.split('; '))
+      if (item.isNotEmpty && item != part) item,
+  ];
+  return kept.join('; ');
+}
+
+class _PendingRest {
+  _PendingRest(this.set, this.note, {required this.leading});
+
+  final ParsedSet set;
+  final String note;
+  final bool leading;
+}
+
+void _applyPendingRests(List<ParsedSession> sessions) {
+  for (final session in sessions) {
+    for (final pending in session._pendingRests) {
+      pending.set.notes = pending.leading
+          ? _joinNotes(pending.note, pending.set.notes)
+          : _joinNotes(pending.set.notes, pending.note);
+    }
+  }
+}
+
+void _giveRestNote(ParsedSession session, String note, {required bool leading}) {
+  session.notes = leading
+      ? _joinNotes(note, session.notes)
+      : _joinNotes(session.notes, note);
+  if (session.sets.isEmpty) {
+    return;
+  }
+  final set = leading ? session.sets.first : session.sets.last;
+  session._pendingRests.add(_PendingRest(set, note, leading: leading));
+}
+
+bool _isRestFragment(String text) {
+  final noted = _pullRest(text);
+  return noted.text.isEmpty && noted.notes != null && noted.notes!.isNotEmpty;
 }
 
 bool _isRestOnly(ParsedSession session) {

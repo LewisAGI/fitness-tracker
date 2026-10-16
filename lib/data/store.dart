@@ -119,6 +119,7 @@ class Store extends ChangeNotifier {
 
   Future<void> init({String? path}) async {
     _db = await openFitnessDatabase(path: path);
+    await _ensureSeedExercises();
     exercises = await _readExercises();
     goals = await _readGoals();
     schedule = await _readSchedule();
@@ -498,6 +499,7 @@ class Store extends ChangeNotifier {
           'type': first.type,
           'duration_min': first.durationMin,
           'rpe': first.rpe,
+          'notes': first.notes,
           'raw_transcript': first.raw,
         },
         where: 'id = ?',
@@ -1283,6 +1285,30 @@ class Store extends ChangeNotifier {
           fatigue: (row['fatigue'] as num).toDouble(),
         ),
     ];
+  }
+
+  Future<void> _ensureSeedExercises() async {
+    final rows = await db.query('exercises', columns: ['name']);
+    final names = {for (final row in rows) row['name'] as String};
+    final batch = db.batch();
+    var missing = false;
+    for (final exercise in seedExercises()) {
+      if (names.contains(exercise.name)) {
+        continue;
+      }
+      missing = true;
+      batch.insert('exercises', {
+        'id': exercise.id,
+        'name': exercise.name,
+        'category': exercise.category,
+        'muscle_groups': jsonEncode(exercise.muscleGroups),
+        'aliases': jsonEncode(exercise.aliases),
+        'default_load_factor': exercise.defaultLoadFactor,
+      });
+    }
+    if (missing) {
+      await batch.commit(noResult: true);
+    }
   }
 
   Future<List<Exercise>> _readExercises() async {
