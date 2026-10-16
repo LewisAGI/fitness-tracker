@@ -76,7 +76,8 @@ class _ShareDeckState extends State<_ShareDeck> {
     setState(() => _files = [workout, day, week, month]);
   }
 
-  ExportFiles? get _current => _page >= 0 && _page < _files.length ? _files[_page] : null;
+  ExportFiles? get _current =>
+      _page >= 0 && _page < _files.length ? _files[_page] : null;
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +102,10 @@ class _ShareDeckState extends State<_ShareDeck> {
                 itemCount: _titles.length,
                 onPageChanged: (index) => setState(() => _page = index),
                 itemBuilder: (context, index) => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 8,
+                  ),
                   child: _card(index),
                 ),
               ),
@@ -131,7 +135,7 @@ class _ShareDeckState extends State<_ShareDeck> {
                   icon: Icons.copy,
                   message: 'Copy',
                   filled: false,
-                  onPressed: () async {
+                  onPressed: (_) async {
                     final text = _current?.plain;
                     if (text == null || text.isEmpty) {
                       return;
@@ -145,12 +149,14 @@ class _ShareDeckState extends State<_ShareDeck> {
                   icon: Icons.auto_awesome,
                   message: 'Grok',
                   filled: true,
-                  onPressed: () async {
+                  onPressed: (buttonContext) async {
                     final text = _current?.plain;
-                    if (text == null || text.isEmpty || !context.mounted) {
+                    if (text == null ||
+                        text.isEmpty ||
+                        !buttonContext.mounted) {
                       return;
                     }
-                    await shareText(context, text);
+                    await shareText(buttonContext, text);
                   },
                 ),
                 const SizedBox(width: 22),
@@ -159,12 +165,12 @@ class _ShareDeckState extends State<_ShareDeck> {
                   icon: Icons.ios_share,
                   message: 'Share',
                   filled: false,
-                  onPressed: () async {
+                  onPressed: (buttonContext) async {
                     final files = _current;
-                    if (files == null || !context.mounted) {
+                    if (files == null || !buttonContext.mounted) {
                       return;
                     }
-                    await shareExport(context, files);
+                    await shareExport(buttonContext, files);
                   },
                 ),
               ],
@@ -225,23 +231,25 @@ class _ShareDeckState extends State<_ShareDeck> {
     required IconData icon,
     required String message,
     required bool filled,
-    required VoidCallback onPressed,
+    required Future<void> Function(BuildContext buttonContext) onPressed,
   }) {
     return Tooltip(
       message: message,
-      child: Material(
-        key: key,
-        color: filled ? AppColors.accent : AppColors.accentSoft,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: SizedBox(
-            width: 56,
-            height: 56,
-            child: Icon(
-              icon,
-              color: filled ? Colors.white : AppColors.accent,
+      child: Builder(
+        builder: (buttonContext) => Material(
+          key: key,
+          color: filled ? AppColors.accent : AppColors.accentSoft,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => onPressed(buttonContext),
+            child: SizedBox(
+              width: 56,
+              height: 56,
+              child: Icon(
+                icon,
+                color: filled ? Colors.white : AppColors.accent,
+              ),
             ),
           ),
         ),

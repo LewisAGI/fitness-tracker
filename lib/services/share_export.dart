@@ -44,41 +44,84 @@ Future<void> offerExport(BuildContext context, ExportFiles files) {
   );
 }
 
-Rect? _shareOrigin(BuildContext context) {
+/// The button's rect, used to anchor an iPad share popover.
+Rect? shareAnchorRect(BuildContext context) {
+  final box = context.findRenderObject();
+  if (box is RenderBox &&
+      box.hasSize &&
+      box.size.width > 0 &&
+      box.size.height > 0) {
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+  return null;
+}
+
+Rect? sharePositionOrigin(BuildContext context) {
   if (!Platform.isIOS) {
     return null;
   }
-  final box = context.findRenderObject();
-  if (box is RenderBox && box.hasSize && box.size.width > 0) {
-    return box.localToGlobal(Offset.zero) & box.size;
-  }
-  return const Rect.fromLTWH(1, 1, 2, 2);
+  return shareAnchorRect(context) ?? const Rect.fromLTWH(1, 1, 2, 2);
 }
 
 Future<void> shareText(BuildContext context, String text) async {
   await SharePlus.instance.share(
-    ShareParams(text: text, sharePositionOrigin: _shareOrigin(context)),
+    ShareParams(text: text, sharePositionOrigin: sharePositionOrigin(context)),
   );
 }
 
+Future<List<File>> writeExportFiles(
+  Directory directory,
+  ExportFiles files,
+) async {
+  final written = [
+    File('${directory.path}/fitness.txt'),
+    File('${directory.path}/fitness-summary-v1.json'),
+    File('${directory.path}/summary.md'),
+  ];
+  await written[0].writeAsString(files.plain);
+  await written[1].writeAsString(files.json);
+  await written[2].writeAsString(files.markdown);
+  return written;
+}
+
+Future<void> deleteExportFiles(List<File> files) async {
+  for (final file in files) {
+    try {
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } on FileSystemException {
+      // The sheet may already have removed it.
+    }
+  }
+}
+
+/// Runs [share], then removes [files] whether the sheet completed or threw.
+Future<void> shareWrittenFiles(
+  List<File> files,
+  Future<void> Function() share,
+) async {
+  try {
+    await share();
+  } finally {
+    await deleteExportFiles(files);
+  }
+}
+
 Future<void> shareExport(BuildContext context, ExportFiles files) async {
-  final origin = _shareOrigin(context);
-  final dir = await getTemporaryDirectory();
-  final textFile = File('${dir.path}/fitness.txt');
-  final jsonFile = File('${dir.path}/fitness-summary-v1.json');
-  final mdFile = File('${dir.path}/summary.md');
-  await textFile.writeAsString(files.plain);
-  await jsonFile.writeAsString(files.json);
-  await mdFile.writeAsString(files.markdown);
-  await SharePlus.instance.share(
-    ShareParams(
-      text: files.plain,
-      files: [
-        XFile(textFile.path, mimeType: 'text/plain'),
-        XFile(jsonFile.path, mimeType: 'application/json'),
-        XFile(mdFile.path, mimeType: 'text/markdown'),
-      ],
-      sharePositionOrigin: origin,
-    ),
-  );
+  final origin = sharePositionOrigin(context);
+  final written = await writeExportFiles(await getTemporaryDirectory(), files);
+  await shareWrittenFiles(written, () async {
+    await SharePlus.instance.share(
+      ShareParams(
+        text: files.plain,
+        files: [
+          XFile(written[0].path, mimeType: 'text/plain'),
+          XFile(written[1].path, mimeType: 'application/json'),
+          XFile(written[2].path, mimeType: 'text/markdown'),
+        ],
+        sharePositionOrigin: origin,
+      ),
+    );
+  });
 }

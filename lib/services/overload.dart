@@ -124,20 +124,22 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
       .toList();
   final reps = working.map((set) => set.reps).toList();
   final bias = lift.bias ?? context.bias;
-  final target = _target(lift, bias);
-  final hitTop = working.every((set) => set.reps >= target.high);
+  // Hit and miss use the range this week was trained for. The goal only
+  // chooses the range stored for next week, and the size of the step.
+  final judged = _previousRange(lift);
+  final next = bias == TrainingBias.standard ? judged : rangeForBias(bias);
+  final hitTop = working.every((set) => set.reps >= judged.high);
   final lower = isLowerBody(lift.muscleGroups);
   final increment = stepKg(bias, lower: lower);
-  final lowReady =
-      context.meanReadiness != null && context.meanReadiness! < 40;
+  final lowReady = context.meanReadiness != null && context.meanReadiness! < 40;
   final warned = lift.muscleGroups.any(
     (muscle) => context.warnedMuscles.contains(muscle.toLowerCase()),
   );
-  final missed = working.any((set) => set.reps < target.low);
-  final aim = missed ? target.low : target.high;
+  final missed = working.any((set) => set.reps < judged.low);
+  final aim = missed ? next.low : next.high;
   final flagged = lowReady || warned;
   final failedEarly = working.any(
-    (set) => set.rir == 0 && set.reps < target.low,
+    (set) => set.rir == 0 && set.reps < judged.low,
   );
   // RIR above 5 is rejected input and must not step the weight up.
   final rirStep = working.every(
@@ -145,7 +147,7 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
         set.rir != null &&
         set.rir! >= 2 &&
         set.rir! <= 5 &&
-        set.reps >= target.low,
+        set.reps >= judged.low,
   );
 
   late final OverloadAction action;
@@ -162,7 +164,7 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   } else if (hitTop || rirStep) {
     action = OverloadAction.progress;
     nextWeight = workingWeight + increment;
-    aimReps = target.low;
+    aimReps = next.low;
   } else {
     action = OverloadAction.keep;
     nextWeight = workingWeight;
@@ -176,8 +178,8 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
     muscleGroups: lift.muscleGroups,
     workingWeightKg: workingWeight,
     reps: reps,
-    repLow: target.low,
-    repHigh: target.high,
+    repLow: next.low,
+    repHigh: next.high,
     action: action,
     suggestedWeightKg: nextWeight,
     aimReps: aimReps,
@@ -192,10 +194,8 @@ OverloadSuggestion? suggestLift(LiftWeekInput lift, WeekContext context) {
   );
 }
 
-({int low, int high}) _target(LiftWeekInput lift, TrainingBias bias) {
-  if (bias != TrainingBias.standard) {
-    return rangeForBias(bias);
-  }
+/// The range the lifter was already working in. A general goal does not replace it.
+({int low, int high}) _previousRange(LiftWeekInput lift) {
   if (lift.priorRepLow != null && lift.priorRepHigh != null) {
     return (low: lift.priorRepLow!, high: lift.priorRepHigh!);
   }

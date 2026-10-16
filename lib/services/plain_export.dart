@@ -13,20 +13,18 @@ String buildPlainText({
   required List<Goal> goals,
   required List<StoredSuggestion> suggestions,
 }) {
-  final blocks = <String>[
-    '# Fitness Tracker\n${_scopeLine(kind, start, end)}',
-  ];
+  final blocks = <String>['# Fitness Tracker\n${_scopeLine(kind, start, end)}'];
   final orderedSessions = [...sessions]..sort(_compareSessions);
   if (orderedSessions.isNotEmpty) {
     blocks.add(
-      orderedSessions.map((session) => _sessionBlock(session, goals)).join('\n\n'),
+      orderedSessions
+          .map((session) => _sessionBlock(session, goals))
+          .join('\n\n'),
     );
   }
   final orderedChecks = [...checkins]..sort(_compareChecks);
   if (orderedChecks.isNotEmpty) {
-    blocks.add(
-      '## Check-ins\n${orderedChecks.map(_checkLine).join('\n')}',
-    );
+    blocks.add('## Check-ins\n${orderedChecks.map(_checkLine).join('\n')}');
   }
   if (kind == 'week' || kind == 'month') {
     final reports = balanceReports(
@@ -36,9 +34,7 @@ String buildPlainText({
       splitWeeks: kind == 'month',
     );
     if (reports.isNotEmpty) {
-      blocks.add(
-        '## Balance\n${reports.map(_balanceBlock).join('\n\n')}',
-      );
+      blocks.add('## Balance\n${reports.map(_balanceBlock).join('\n\n')}');
     }
   }
   if (goals.isNotEmpty) {
@@ -94,7 +90,9 @@ int _slotRank(String slot) => switch (slot) {
 String _sessionBlock(Session session, List<Goal> goals) {
   final lines = <String>[_sessionHeading(session)];
   for (final set in session.sets) {
-    lines.add(_setLine(session, set));
+    if (_setHasContent(set)) {
+      lines.add(_setLine(session, set));
+    }
     lines.addAll(paceFlagLinesForSet(session, set, goals));
   }
   for (final block in session.blocks) {
@@ -112,10 +110,20 @@ String _sessionHeading(Session session) {
       ? session.date
       : '${session.date} ${session.startTime}';
   final bits = <String>[when, _typeLabel(session.type)];
+  if (session.durationMin != null) {
+    bits.add('${session.durationMin} min');
+  }
   if (session.rpe != null) {
     bits.add('RPE ${session.rpe}');
   }
   return '## ${bits.join(' · ')}';
+}
+
+bool _setHasContent(SetRow set) {
+  if (set.distanceKm != null) {
+    return true;
+  }
+  return set.reps != null || set.weightKg != null || set.bodyweight;
 }
 
 String _setLine(Session session, SetRow set) {

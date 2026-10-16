@@ -19,11 +19,7 @@ void main() {
           type: 'run',
           rpe: 6,
           sets: const [
-            SetRow(
-              exerciseName: 'Run',
-              distanceKm: 5,
-              durationS: 28 * 60,
-            ),
+            SetRow(exerciseName: 'Run', distanceKm: 5, durationS: 28 * 60),
           ],
         ),
         const Session(
@@ -183,7 +179,10 @@ Bench press · 70 / 100 kg
 ## Next week
 Bench: 70 kg x 8 -> 75 kg
 ''');
-    expect(files.markdown, contains('upper-heavy: legs got 30% of the sets chest got'));
+    expect(
+      files.markdown,
+      contains('upper-heavy: legs got 30% of the sets chest got'),
+    );
     expect(files.markdown, contains('Strength · 3/23 sets in 3-6'));
     expect(files.json, contains('"flags"'));
     expect(files.json, contains('goal_progress'));
@@ -217,12 +216,7 @@ Bench: 70 kg x 8 -> 75 kg
         ],
         plans: const [],
         checkins: const [
-          CheckIn(
-            date: '2026-10-05',
-            slot: 'morning',
-            soreness: 4,
-            energy: 7,
-          ),
+          CheckIn(date: '2026-10-05', slot: 'morning', soreness: 4, energy: 7),
         ],
         warnings: const [],
         patterns: const [],
@@ -299,9 +293,77 @@ Notes: easy
       ),
     );
     expect(files.plain, contains('Month ·'));
-    expect(files.plain, contains('upper-heavy: legs got 0% of the sets chest got'));
-    expect(files.plain, contains('lower-heavy: chest got 0% of the sets legs got'));
-    expect(files.plain, contains(fmtRange(DateTime(2026, 10, 1), DateTime(2026, 10, 4))));
-    expect(files.plain, contains(fmtRange(DateTime(2026, 10, 19), DateTime(2026, 10, 25))));
+    expect(
+      files.plain,
+      contains('upper-heavy: legs got 0% of the sets chest got'),
+    );
+    expect(
+      files.plain,
+      contains('lower-heavy: chest got 0% of the sets legs got'),
+    );
+    expect(
+      files.plain,
+      contains(fmtRange(DateTime(2026, 10, 1), DateTime(2026, 10, 4))),
+    );
+    expect(
+      files.plain,
+      contains(fmtRange(DateTime(2026, 10, 19), DateTime(2026, 10, 25))),
+    );
+  });
+
+  test('timed sessions keep their minutes and empty sets are omitted', () {
+    final files = buildExport(
+      ExportSnapshot(
+        kind: 'workout',
+        start: DateTime(2026, 10, 11),
+        end: DateTime(2026, 10, 11),
+        sessions: const [
+          Session(
+            id: 1,
+            date: '2026-10-11',
+            type: 'muay_thai',
+            durationMin: 75,
+            rpe: 8,
+          ),
+          Session(id: 2, date: '2026-10-11', type: 'yoga', durationMin: 40),
+          Session(
+            id: 3,
+            date: '2026-10-11',
+            startTime: '09:00',
+            type: 'gym',
+            durationMin: 45,
+            rpe: 6,
+            sets: [
+              SetRow(),
+              SetRow(
+                exerciseName: 'Bench press',
+                setCount: 4,
+                reps: 8,
+                weightKg: 70,
+              ),
+              SetRow(exerciseName: 'Pull-up', bodyweight: true),
+            ],
+          ),
+        ],
+        plans: [],
+        checkins: [],
+        warnings: [],
+        patterns: [],
+        suggestions: [],
+      ),
+    );
+    expect(files.plain, '''
+# Fitness Tracker
+Workout · Sun 11 Oct
+
+## 2026-10-11 · Muay Thai · 75 min · RPE 8
+
+## 2026-10-11 · Yoga · 40 min
+
+## 2026-10-11 09:00 · Gym · 45 min · RPE 6
+Bench press · 4 x 8 x 70 kg
+Pull-up · 1 · bodyweight
+''');
+    expect(files.plain, isNot(contains('? · 1')));
   });
 }

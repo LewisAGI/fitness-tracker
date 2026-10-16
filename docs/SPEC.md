@@ -60,7 +60,7 @@ For each lift, per week. Working sets are the sets at the heaviest weight; bodyw
 - Low readiness and a strain warning, with the reps hit: hold, not deload.
 - RIR 0 before the target reps: hold, unless the deload condition applies. RIR 0 after the reps were hit does not hold.
 
-This rule is the default when no general goal is active. A general goal replaces the rep range and the step while it is the newest general goal. The stored range is not used in that case. Rounding, deload, RIR, and the readiness/strain precedence stay as written above. See Goals.
+This rule is the default when no general goal is active. A general goal sets the rep range stored for next week, and the load step, while it is the newest general goal. Whether this week hit, missed, or earned an RIR step is still judged on the lift's stored range, or on 8–12 when none is stored. The card aims at the low end of next week's range when reps were missed, and at the high end when they landed inside the previous range. Rounding, deload, and the readiness/strain precedence stay as written above. See Goals.
 
 ## Plain-text export
 
@@ -69,8 +69,8 @@ A workout, a day, a week, or a month becomes one plain-text block for pasting in
 The block, in order, omitting a heading when it has nothing to say:
 
 1. `# Fitness Tracker` and a scope line: `Workout · Mon 5 Oct`, `Day · Mon 5 Oct`, `Week · 5–11 Oct 2026`, or `Month · …`.
-2. One `##` heading per session: `date`, the start time when it was stored, the type, and the session RPE. Sessions are ordered by date, then time, then id.
-3. Each lift: `Name · sets x reps x kg`, then `· RIR n` when RIR was logged. Bodyweight is `Name · sets x reps · bodyweight`. A set RPE is added only when that set stored one.
+2. One `##` heading per session: `date`, the start time when it was stored, the type, `N min` when a duration was stored, and the session RPE. Sessions are ordered by date, then time, then id.
+3. Each lift: `Name · sets x reps x kg`, then `· RIR n` when RIR was logged. Bodyweight is `Name · sets x reps · bodyweight`. A set RPE is added only when that set stored one. A set with no distance, no reps, no weight, and no bodyweight mark is left out.
 4. Each run: `Name · km · m:ss · m:ss/km`. Time comes from the set's duration, or from the session duration when the set has none. Pace is duration ÷ distance, rounded to the nearest second, written as minutes:seconds per km.
 5. A run that misses a pace goal gets the next line `slow: 5:36/km at 5 km, goal 5:00/km`.
 6. Muay Thai blocks: `Pads · 20 min · RPE 8`. Session notes: `Notes: …` on one line.
@@ -101,7 +101,7 @@ Equal counts are not a flag. The percentage printed in the sentence is the neare
 
 Wording, with no capital and no full stop: `upper-heavy: legs got 30% of the sets chest got`.
 
-The plan screen shows the sets, the volume, and any flags for the week on screen. A week export has one balance block for that range. A month export has one block per Monday–Sunday week that contains lifting sets inside the month. Days outside the month are not included, so a week that crosses the month boundary is clipped to the month.
+The plan screen shows the sets, the volume, and any flags for the week on screen. A week export has one balance block for that range. A month export has one block per Monday–Sunday week that contains lifting sets inside the month. Days outside the month are not included, so a week that crosses the month boundary is clipped to the month. The next week starts on the calendar date seven days later (`DateTime(year, month, day + 7)`), and the week ends six calendar days later, so a clock change cannot move Monday onto Sunday evening and leave that Monday out.
 
 ## Goals
 
@@ -111,7 +111,7 @@ One or more goals, each of one kind. Schema version 3, table `goals`.
 |---|---|---|
 | `pace` | distance in km, target pace in seconds per km | Flags a run. Does not change the overload step. |
 | `lift` | exercise id, target kg | Shows current best against the target. Does not change the overload step. |
-| `general` | `strength`, `fitness`, or `hypertrophy` | The newest general goal sets the rep range and the step for every lift. |
+| `general` | `strength`, `fitness`, or `hypertrophy` | The newest general goal sets next week's rep range and the step. This week's hit or miss still uses the stored range. |
 
 With no general goal, suggestions stay on the default overload rule (8–12, or that lift's stored range, +2.5 kg upper / +5 kg lower).
 

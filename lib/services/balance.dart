@@ -68,14 +68,8 @@ class _Side {
 }
 
 const _splits = [
-  (
-    _Side('upper', 'chest', upperMuscles),
-    _Side('lower', 'legs', lowerMuscles),
-  ),
-  (
-    _Side('push', 'push', pushMuscles),
-    _Side('pull', 'pull', pullMuscles),
-  ),
+  (_Side('upper', 'chest', upperMuscles), _Side('lower', 'legs', lowerMuscles)),
+  (_Side('push', 'push', pushMuscles), _Side('pull', 'pull', pullMuscles)),
   (
     _Side('front', 'front', frontMuscles),
     _Side('back', 'back', backChainMuscles),
@@ -102,7 +96,7 @@ List<BalanceReport> balanceReports({
   final last = dateOnly(end);
   var cursor = weekStart(start);
   while (!cursor.isAfter(last)) {
-    final weekEnd = cursor.add(const Duration(days: 6));
+    final weekEnd = _calendarDays(cursor, 6);
     final from = cursor.isBefore(dateOnly(start)) ? dateOnly(start) : cursor;
     final to = weekEnd.isAfter(last) ? last : weekEnd;
     final slice = [
@@ -113,10 +107,14 @@ List<BalanceReport> balanceReports({
     if (!report.isEmpty) {
       reports.add(report);
     }
-    cursor = cursor.add(const Duration(days: 7));
+    cursor = _calendarDays(cursor, 7);
   }
   return reports;
 }
+
+/// Calendar days, not 24-hour steps. A clock change must not land Monday on Sunday.
+DateTime _calendarDays(DateTime day, int days) =>
+    DateTime(day.year, day.month, day.day + days);
 
 bool _inRange(String iso, DateTime start, DateTime end) {
   final day = parseIsoDate(iso);
@@ -134,20 +132,21 @@ BalanceReport buildBalance({
       _addSet(tallies, set);
     }
   }
-  final muscles = [
-    for (final entry in tallies.entries)
-      MuscleLoad(
-        muscle: entry.key,
-        sets: entry.value.sets,
-        volumeKg: entry.value.volume,
-      ),
-  ]..sort((a, b) {
-    final bySets = b.sets.compareTo(a.sets);
-    if (bySets != 0) {
-      return bySets;
-    }
-    return a.muscle.compareTo(b.muscle);
-  });
+  final muscles =
+      [
+        for (final entry in tallies.entries)
+          MuscleLoad(
+            muscle: entry.key,
+            sets: entry.value.sets,
+            volumeKg: entry.value.volume,
+          ),
+      ]..sort((a, b) {
+        final bySets = b.sets.compareTo(a.sets);
+        if (bySets != 0) {
+          return bySets;
+        }
+        return a.muscle.compareTo(b.muscle);
+      });
   final flags = <String>[];
   for (final split in _splits) {
     final flag = _flag(tallies, split.$1, split.$2);
