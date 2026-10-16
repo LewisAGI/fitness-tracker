@@ -243,4 +243,57 @@ void main() {
     expect(suggestion.action, OverloadAction.progress);
     expect(suggestion.suggestedWeightKg, 65);
   });
+
+  test('a new goal judges the previous range and aims at the next one', () {
+    final stepped = suggestLift(
+      const LiftWeekInput(
+        exerciseName: 'Bench press',
+        muscleGroups: ['chest'],
+        priorRepLow: 5,
+        priorRepHigh: 8,
+        sets: [
+          WorkingSet(weightKg: 80, reps: 5, rir: 2),
+          WorkingSet(weightKg: 80, reps: 5, rir: 3),
+        ],
+      ),
+      const WeekContext(bias: TrainingBias.hypertrophy),
+    )!;
+    expect(stepped.action, OverloadAction.progress);
+    expect(stepped.suggestedWeightKg, 82.5);
+    expect(stepped.repLow, 6);
+    expect(stepped.repHigh, 12);
+    expect(stepped.aimReps, 6);
+
+    final topped = suggestLift(
+      const LiftWeekInput(
+        exerciseName: 'Bench press',
+        muscleGroups: ['chest'],
+        priorRepLow: 5,
+        priorRepHigh: 8,
+        sets: [
+          WorkingSet(weightKg: 80, reps: 8),
+          WorkingSet(weightKg: 80, reps: 8),
+        ],
+      ),
+      const WeekContext(bias: TrainingBias.hypertrophy),
+    )!;
+    expect(topped.action, OverloadAction.progress);
+    expect(topped.aimReps, 6);
+    expect(topped.repLow, 6);
+    expect(topped.repHigh, 12);
+
+    final early = suggestLift(
+      const LiftWeekInput(
+        exerciseName: 'Bench press',
+        muscleGroups: ['chest'],
+        sets: [WorkingSet(weightKg: 80, reps: 5, rir: 0)],
+      ),
+      const WeekContext(bias: TrainingBias.strength),
+    )!;
+    expect(early.action, OverloadAction.hold);
+    expect(early.suggestedWeightKg, 80);
+    expect(early.repLow, 3);
+    expect(early.repHigh, 6);
+    expect(early.aimReps, isNull);
+  });
 }

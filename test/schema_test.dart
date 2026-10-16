@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:fitness_tracker/data/database.dart';
+import 'package:fitness_tracker/data/store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -145,6 +146,34 @@ void main() {
     expect(await upgraded.query('goals'), hasLength(1));
     expect((await upgraded.query('sets')).single['rir'], 2);
     await upgraded.close();
+  });
+
+  test('an older database gains air squat and pistol squat', () async {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    final directory = await Directory.systemTemp.createTemp('fitness-seed');
+    final path = '${directory.path}/seed.db';
+    final created = await openFitnessDatabase(path: path);
+    final removed = await created.delete(
+      'exercises',
+      where: 'name = ? OR name = ?',
+      whereArgs: ['Air squat', 'Pistol squat'],
+    );
+    expect(removed, 2);
+    await created.close();
+
+    final store = Store(clock: () => DateTime(2026, 10, 12, 9));
+    await store.init(path: path);
+    final air = store.exerciseByName('Air squat');
+    final pistol = store.exerciseByName('Pistol squat');
+    expect(air, isNotNull);
+    expect(air!.category, 'strength');
+    expect(air.bodyweight, isTrue);
+    expect(air.aliases, contains('air squats'));
+    expect(pistol, isNotNull);
+    expect(pistol!.bodyweight, isTrue);
+    expect(pistol.aliases, contains('pistol squats'));
+    expect(store.exerciseByName('Bench press'), isNotNull);
   });
 
   test('a newer file is not downgraded', () async {

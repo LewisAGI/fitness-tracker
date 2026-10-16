@@ -33,7 +33,14 @@ void main() {
       }
 
       final shared = await writeExportFiles(dir, files);
-      await shareWrittenFiles(shared, () async {});
+      var sawFiles = false;
+      await shareWrittenFiles(shared, () async {
+        sawFiles = true;
+        expect(shared[0].readAsStringSync(), 'plain');
+        expect(shared[1].readAsStringSync(), '{}');
+        expect(shared[2].readAsStringSync(), '# m');
+      });
+      expect(sawFiles, isTrue);
       for (final file in shared) {
         expect(file.existsSync(), isFalse);
       }
@@ -60,10 +67,15 @@ void main() {
         ),
       ),
     );
+    final button = tester.getRect(find.byKey(const ValueKey('share-files')));
     final rect = shareAnchorRect(buttonContext);
     expect(rect, isNotNull);
-    expect(rect!.width, 56);
-    expect(rect.height, 56);
+    expect(rect!.left, button.left);
+    expect(rect.top, button.top);
+    expect(rect.width, button.width);
+    expect(rect.height, button.height);
+    expect(rect.width, greaterThan(0));
+    expect(rect.height, greaterThan(0));
     expect(sharePositionOrigin(buttonContext), isNull);
   });
 }
