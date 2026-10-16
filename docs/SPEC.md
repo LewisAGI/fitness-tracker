@@ -7,16 +7,16 @@ Personal, phone-only training log you talk to. Built the Shelf way: Flutter (3.4
 **Non-goals:** no LLM/API calls or keys, no wearables/HealthKit in MVP, no social, no coaching programmes, no calorie tracking, no commercial polish or store listing.
 
 ## UI rules (apply everywhere)
-No explanatory/help text on screens. Icon-only controls, labels on long-press (tooltip on hover). Choices open as pop-ups/pop-outs, never rows of pills. White canvas, one accent colour, British English.
+No explanatory/help text on screens. Icon-only controls, labels on long-press (tooltip on hover). Choices open as pop-ups/pop-outs, never rows of pills. White canvas, one accent colour, British English. Layout uses large titles, rounded cards, and the existing palette only.
 
 ## User flows
-1. **Log after sets:** tap and hold the mic (home or lock-screen widget later). Say "bench press, 4 sets of 8 at 70 kilos". A confirm card pops up (exercise · 4×8 · 70 kg). It auto-saves after 3 s, or tap any field to fix it (pop-out picker). The same flow works for "Muay Thai, 90 minutes, hard" and "ran 5k in 28 minutes, RPE 6".
-2. **Plan the week:** Plan tab, 7 day columns. Tap a day → pop-up: session type (+ optional muscle groups/intensity), or say it ("Tuesday Thai hard, Wednesday legs heavy"). Strain icons appear on flagged days; tap one for the evidence pop-out.
+1. **Log after sets:** tap and hold the mic in the top bar. Say "bench press, 4 sets of 8 at 70 kilos". A confirm card pops up (exercise · 4×8 · 70 kg). It auto-saves after 3 s, or tap any field to fix it (pop-out picker). Logged sets are compact cards: reps × kg, tap a number for a picker, +/− change the set count. A floating rest pill counts 90 s. Finish opens a bottom sheet with an RPE slider. The same voice flow works for "Muay Thai, 90 minutes, hard" and "ran 5k in 28 minutes, RPE 6".
+2. **Plan the week:** Plan tab, 7 day columns. The week opens with load as a percent of target (dotted target and overreach lines) and a period pop-out (day, week, 3 months, year). Balance is four bars — push, pull, legs, core — and the neglected regions use the accent. Lift goals sit on a card with a ruler. Step-up suggestions are arrow chips. Tap a day → pop-up: session type (+ optional muscle groups/intensity), or say it ("Tuesday Thai hard, Wednesday legs heavy"). Strain icons appear on flagged days; tap one for the evidence pop-out.
 3. **Daily check-in:** a notification at a set time (default 8am). One screen, six sliders 1–10, or answer by voice in one sentence ("sore 6, energy 4, slept 7 hours…"). Done in about 30 s.
-4. **Export:** ⋮ → Day / Week / Month, or the share icon on a session. A pop-up offers copy and share. The paste is one plain-text block. The share sheet also attaches `fitness.txt`, `fitness-summary-v1.json`, and `summary.md`.
+4. **Export:** one share icon. It opens swipeable Workout, Day, Week, and Month cards. Copy puts the plain text on the clipboard. Grok shares that text. Share attaches `fitness.txt`, `fitness-summary-v1.json`, and `summary.md` as well.
 
 ## Screens
-Today (mic, today's plan, logged sessions, check-in status, export) · Plan (week grid, balance, goal lines, lift cards, warnings) · History (calendar, tap day → sessions + check-in, export that day or one workout) · Insights (learned patterns table, each with N and effect) · Settings (exercise dictionary/aliases, check-in time, goals, export).
+Today (mic in the bar, today's plan, set cards, rest pill, finish sheet, one share icon) · Plan (load hero, period pop-out, balance bars, goal ruler, arrow chips, week grid, warnings) · History (calendar, tap day → sessions + check-in) · Insights (learned patterns table, each with N and effect) · Settings (exercise dictionary/aliases, check-in time, goals, import).
 
 ## Data model (SQLite)
 - `exercises` — id, name, category (strength/cardio/combat/mobility), muscle_groups (list), aliases (list), default_load_factor
@@ -153,14 +153,14 @@ On-device STT: iOS `SFSpeechRecognizer` (`requiresOnDeviceRecognition`), Android
 The seeded dictionary has about 80 exercises plus aliases. Each correction made on the confirm card adds an alias automatically, so the parser learns his phrasing deterministically.
 
 ## Grok hand-off
-Copy or share a workout, day, week, or month. The clipboard and the share-sheet text are the plain-text block above, which is what gets pasted into Grok or any other AI. The share sheet also attaches `fitness.txt`, `fitness-summary-v1.json` (sessions, sets, check-ins, plan vs actual, warnings, patterns, lift cards, balance, goals, goal progress), and `summary.md`. No keys, no API. On iOS the sheet sets `sharePositionOrigin`. An optional BYO-key "Ask AI" is left for later.
+One share icon opens swipeable Workout, Day, Week, and Month cards. Copy and the Grok action use the plain-text block above, which is what gets pasted into Grok or any other AI. Share also attaches `fitness.txt`, `fitness-summary-v1.json` (sessions, sets, check-ins, plan vs actual, warnings, patterns, lift cards, balance, goals, goal progress), and `summary.md`. No keys, no API. On iOS the sheet sets `sharePositionOrigin`. An optional BYO-key "Ask AI" is left for later.
 
 ## Privacy
 Everything is local: SQLite + app sandbox, speech on-device, no network calls in MVP, no analytics. The only export is one Lewis starts through the share sheet. Backup is a manual JSON export/import.
 
 ## MVP vs later
 **MVP:** voice logging + confirm card, exercise dictionary, non-gym sessions, Today/Plan/History, check-in (sliders + voice), default rules, pattern learning with evidence, week/month export, iOS + Android sideload.
-**v0.2:** plain-text export of a workout, day, week, or month, with copy and share; weekly balance flags; goals (pace, lift, strength / fitness / hypertrophy) that shape the overload suggestions and flag runs. Schema version 3.
+**v0.2:** plain-text export of a workout, day, week, or month, with copy, Grok, and share from one swipeable deck; weekly balance flags drawn as push/pull/legs/core bars; goals (pace, lift, strength / fitness / hypertrophy) that shape the overload suggestions and flag runs. Schema version 3. The load hero is this period as a percent of the mean of up to four earlier periods with load; overreach is 1.3 × that target.
 **Later:** Insights screen polish, widget/lock-screen mic, Apple Health/Health Connect (sleep, HR), Watch quick-log, progression charts / PRs, BYO-key Ask AI, warning-accuracy review ("were the warnings right?").
 
 ## Open questions

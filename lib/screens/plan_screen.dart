@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../data/store.dart';
 import '../services/dates.dart';
-import '../services/share_export.dart';
+import '../services/week_chart.dart';
 import '../theme/app_theme.dart';
 import '../widgets/balance_card.dart';
 import '../widgets/confirm_action.dart';
+import '../widgets/goal_ruler.dart';
 import '../widgets/icon_tip.dart';
+import '../widgets/load_hero.dart';
 import '../widgets/weekly_cards.dart';
 
 class PlanScreen extends StatefulWidget {
@@ -20,6 +22,9 @@ class PlanScreen extends StatefulWidget {
 
 class _PlanScreenState extends State<PlanScreen> {
   WeekBundle? _week;
+  LoadSeries? _series;
+  var _period = ChartPeriod.week;
+  var _ticket = 0;
 
   @override
   void initState() {
@@ -35,44 +40,57 @@ class _PlanScreenState extends State<PlanScreen> {
   }
 
   Future<void> _load() async {
+    final ticket = ++_ticket;
+    final period = _period;
     final week = await widget.store.loadWeek(widget.store.now());
-    if (mounted) {
-      setState(() => _week = week);
+    final series = await widget.store.loadSeries(period);
+    if (!mounted || ticket != _ticket) {
+      return;
     }
+    setState(() {
+      _week = week;
+      _series = series;
+    });
+  }
+
+  void _setPeriod(ChartPeriod period) {
+    _period = period;
+    _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final week = _week;
+    final series = _series;
     return Scaffold(
       appBar: AppBar(
-        title: Text(week == null ? 'Plan' : fmtRange(week.start, week.start.add(const Duration(days: 6)))),
-        actions: [
-          IconTip(
-            icon: Icons.ios_share,
-            message: 'Export week',
-            onPressed: () {
-              final current = _week;
-              if (current != null) {
-                _export(current);
-              }
-            },
-          ),
-        ],
+        title: Text(
+          week == null
+              ? 'Plan'
+              : fmtRange(week.start, week.start.add(const Duration(days: 6))),
+        ),
       ),
-      body: week == null
+      body: week == null || series == null
           ? const SizedBox.shrink()
           : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+              key: const ValueKey('plan-list'),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
-                BalanceCard(report: week.balance),
-                WeeklyCards(
-                  suggestions: week.suggestions,
-                  goalLines: week.goalLines,
+                LoadHero(
+                  series: series,
+                  period: _period,
+                  onPeriod: _setPeriod,
                 ),
+                BalanceCard(report: week.balance),
+                GoalBoard(
+                  lines: week.goalLines,
+                  goals: widget.store.goals,
+                  onTarget: (id, kg) => widget.store.updateGoalTarget(id, kg),
+                ),
+                WeeklyCards(suggestions: week.suggestions),
                 const SizedBox(height: 8),
                 SizedBox(
-                  height: 280,
+                  height: 220,
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -84,18 +102,6 @@ class _PlanScreenState extends State<PlanScreen> {
               ],
             ),
     );
-  }
-
-  Future<void> _export(WeekBundle week) async {
-    final files = await widget.store.exportRange(
-      start: week.start,
-      end: week.start.add(const Duration(days: 6)),
-      kind: 'week',
-    );
-    if (!mounted) {
-      return;
-    }
-    await offerExport(context, files);
   }
 
   Widget _dayColumn(DayBundle day) {

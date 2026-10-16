@@ -37,8 +37,9 @@ ThemeData buildTheme() {
       titleTextStyle: TextStyle(
         color: AppColors.ink,
         fontFamily: 'Roboto',
-        fontSize: 22,
-        fontWeight: FontWeight.w500,
+        fontSize: 28,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.4,
       ),
       iconTheme: IconThemeData(color: AppColors.accent),
     ),
@@ -51,5 +52,20 @@ ThemeData buildTheme() {
       backgroundColor: AppColors.canvas,
       surfaceTintColor: Colors.transparent,
     ),
+  );
+}
+
+BoxDecoration cardBox() {
+  return BoxDecoration(
+    color: AppColors.canvas,
+    borderRadius: BorderRadius.circular(22),
+    border: Border.all(color: AppColors.hairline),
+    boxShadow: const [
+      BoxShadow(
+        color: Color(0x0A1C1917),
+        blurRadius: 16,
+        offset: Offset(0, 6),
+      ),
+    ],
   );
 }

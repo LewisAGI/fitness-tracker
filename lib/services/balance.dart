@@ -260,3 +260,61 @@ String muscleLine(MuscleLoad load) {
   final noun = load.sets == 1 ? 'set' : 'sets';
   return '${load.muscle} · ${load.sets} $noun · ${fmtKg(load.volumeKg)} kg';
 }
+
+class RegionBar {
+  const RegionBar({
+    required this.label,
+    required this.sets,
+    required this.neglected,
+  });
+
+  final String label;
+  final int sets;
+
+  /// Strictly below the busiest region. The accent is reserved for these.
+  final bool neglected;
+}
+
+/// Push, pull, and legs use the busiest listed muscle. Core uses core sets.
+List<RegionBar> regionBars(BalanceReport report) {
+  final rows = [
+    ('Push', _regionSets(report, pushMuscles)),
+    ('Pull', _regionSets(report, pullMuscles)),
+    ('Legs', _regionSets(report, lowerMuscles)),
+    ('Core', _namedSets(report, 'core')),
+  ];
+  var busiest = 0;
+  for (final row in rows) {
+    if (row.$2 > busiest) {
+      busiest = row.$2;
+    }
+  }
+  return [
+    for (final row in rows)
+      RegionBar(
+        label: row.$1,
+        sets: row.$2,
+        neglected: busiest > 0 && row.$2 < busiest,
+      ),
+  ];
+}
+
+int _regionSets(BalanceReport report, List<String> muscles) {
+  var best = 0;
+  for (final muscle in muscles) {
+    final sets = _namedSets(report, muscle);
+    if (sets > best) {
+      best = sets;
+    }
+  }
+  return best;
+}
+
+int _namedSets(BalanceReport report, String muscle) {
+  for (final load in report.muscles) {
+    if (load.muscle == muscle) {
+      return load.sets;
+    }
+  }
+  return 0;
+}

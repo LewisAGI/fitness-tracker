@@ -4,6 +4,7 @@ import 'package:fitness_tracker/screens/today_screen.dart';
 import 'package:fitness_tracker/services/checkin_scheduler.dart';
 import 'package:fitness_tracker/services/speech_capture.dart';
 import 'package:fitness_tracker/services/voice_parser.dart';
+import 'package:fitness_tracker/theme/app_theme.dart';
 import 'package:fitness_tracker/widgets/confirm_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -45,7 +46,11 @@ void main() {
     expect(find.text('Today'), findsOneWidget);
     expect(find.text('Mon 12 Oct'), findsOneWidget);
     expect(find.text('Gym · legs · hard'), findsOneWidget);
-    expect(find.text('Bench press · 4×8 · 70 kg'), findsWidgets);
+    expect(find.text('Bench press'), findsWidgets);
+    expect(find.text('70 kg'), findsWidgets);
+    expect(find.byKey(const ValueKey('set-reps')), findsWidgets);
+    expect(find.byTooltip('Rest'), findsOneWidget);
+    expect(find.byKey(const ValueKey('share')), findsOneWidget);
     expect(find.byKey(const ValueKey('morning-status')), findsOneWidget);
     expect(find.byKey(const ValueKey('evening-status')), findsOneWidget);
     expect(find.byKey(const ValueKey('mic')), findsOneWidget);
@@ -97,7 +102,19 @@ void main() {
     expect(find.byKey(const ValueKey('weekly-cards')), findsOneWidget);
     expect(find.text('Bench: 80 kg x 7,7 -> keep 80, aim 8s'), findsOneWidget);
     expect(find.text('Row: 50 kg x 12,12 -> 52.5 kg'), findsOneWidget);
+    expect(find.byKey(const ValueKey('load-hero')), findsOneWidget);
+    expect(find.byKey(const ValueKey('balance')), findsOneWidget);
+    expect(find.byType(FilterChip), findsNothing);
+    expect(find.byType(ChoiceChip), findsNothing);
 
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('warning-2026-10-12')),
+      160,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('plan-list')),
+        matching: find.byType(Scrollable),
+      ),
+    );
     await tester.tap(find.byKey(const ValueKey('warning-2026-10-12')));
     await _settle(tester);
     expect(find.textContaining('Thai hard'), findsOneWidget);
@@ -314,6 +331,93 @@ void main() {
     expect(find.text('?'), findsWidgets);
     expect(find.textContaining('0 min'), findsNothing);
   });
+
+  testWidgets('set picker, share deck, and period pop-out', (tester) async {
+    final store = await _ready(tester);
+    await _pump(tester, store, RecordingNotifications());
+
+    await tester.tap(find.byKey(const ValueKey('set-reps')));
+    await _until(tester, () => find.byKey(const ValueKey('pick-9')).evaluate().isNotEmpty);
+    expect(find.byType(ChoiceChip), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('pick-9')));
+    await _until(
+      tester,
+      () =>
+          find.byKey(const ValueKey('pick-9')).evaluate().isEmpty &&
+          find.text('9').evaluate().isNotEmpty,
+    );
+    expect(find.text('9'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Add set'));
+    await _until(tester, () {
+      final finder = find.byKey(const ValueKey('set-count'));
+      if (finder.evaluate().isEmpty) {
+        return false;
+      }
+      return tester.widget<Text>(finder).data == '5';
+    });
+    expect(find.text('5'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Finish'));
+    await _until(
+      tester,
+      () => find.byKey(const ValueKey('finish-sheet')).evaluate().isNotEmpty,
+    );
+    expect(find.textContaining('How hard'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 400));
+    final save = find.descendant(
+      of: find.byKey(const ValueKey('finish-sheet')),
+      matching: find.byTooltip('Save'),
+    );
+    tester.widget<IconButton>(find.descendant(of: save, matching: find.byType(IconButton))).onPressed!();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('finish-sheet')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('share')));
+    await _until(tester, () => find.text('WORKOUT').evaluate().isNotEmpty);
+    expect(find.byTooltip('Copy'), findsOneWidget);
+    expect(find.byTooltip('Grok'), findsOneWidget);
+    expect(find.byTooltip('Share'), findsWidgets);
+    expect(find.text('DAY'), findsWidgets);
+    await tester.fling(
+      find.byKey(const ValueKey('share-deck')),
+      const Offset(-400, 0),
+      1200,
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('WEEK'), findsWidgets);
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('WORKOUT'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('tab-Plan')));
+    await _until(tester, () => find.byKey(const ValueKey('load-hero')).evaluate().isNotEmpty);
+    final pull = tester.widget<Container>(find.byKey(const ValueKey('balance-bar-Pull')));
+    final push = tester.widget<Container>(find.byKey(const ValueKey('balance-bar-Push')));
+    expect((pull.decoration! as BoxDecoration).color, AppColors.accent);
+    expect((push.decoration! as BoxDecoration).color, AppColors.ink);
+
+    await tester.tap(find.byKey(const ValueKey('period')));
+    await _until(tester, () => find.byKey(const ValueKey('period-menu')).evaluate().isNotEmpty);
+    expect(find.text('Day'), findsOneWidget);
+    expect(find.text('Week'), findsOneWidget);
+    expect(find.text('3 months'), findsOneWidget);
+    expect(find.text('Year'), findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNothing);
+    await tester.tap(find.text('3 months'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await _until(
+      tester,
+      () => find
+          .descendant(
+            of: find.byKey(const ValueKey('load-hero')),
+            matching: find.text('3 months'),
+          )
+          .evaluate()
+          .isNotEmpty,
+    );
+  });
 }
 
 class _DenyingNotifications extends RecordingNotifications {
@@ -368,6 +472,18 @@ Future<void> _pump(WidgetTester tester, Store store, RecordingNotifications port
 
 /// sqflite finishes on real time, outside FakeAsync. [ready] waits until that
 /// work has updated the tree or the notification port, instead of a fixed slice.
+Future<void> _until(WidgetTester tester, bool Function() ready) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.pump();
+    if (ready()) {
+      await tester.pump();
+      return;
+    }
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+  }
+  fail('Timed out waiting for the screen');
+}
+
 Future<void> _settle(WidgetTester tester, {bool Function()? ready}) async {
   const slices = 40;
   final limit = ready == null ? 8 : slices;

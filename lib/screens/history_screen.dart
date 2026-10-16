@@ -3,10 +3,9 @@ import 'package:flutter/material.dart';
 import '../data/store.dart';
 import '../models/training.dart';
 import '../services/dates.dart';
-import '../services/share_export.dart';
 import '../theme/app_theme.dart';
 import '../widgets/icon_tip.dart';
-import '../widgets/pace_flag.dart';
+import '../widgets/set_log.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.store, this.initialDay});
@@ -153,26 +152,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Future<void> _exportDay(BuildContext context, DateTime day) async {
-    final files = await widget.store.exportRange(
-      start: dateOnly(day),
-      end: dateOnly(day),
-      kind: 'day',
-    );
-    if (!context.mounted) {
-      return;
-    }
-    await offerExport(context, files);
-  }
-
-  Future<void> _exportSession(BuildContext context, Session session) async {
-    final files = await widget.store.exportSession(session);
-    if (!context.mounted) {
-      return;
-    }
-    await offerExport(context, files);
-  }
-
   Future<void> _open(DateTime day) async {
     final bundle = await widget.store.loadDay(day);
     if (!mounted) {
@@ -193,44 +172,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 8),
-                for (final session in bundle.sessions) ...[
-                  Row(
-                    children: [
-                      Expanded(child: Text(sessionLine(session))),
-                      PaceFlagIcon(session: session, goals: widget.store.goals),
-                      IconTip(
-                        icon: Icons.ios_share,
-                        message: 'Export',
-                        onPressed: () => _exportSession(context, session),
-                      ),
-                    ],
+                for (final session in bundle.sessions)
+                  SetLog(
+                    session: session,
+                    goals: widget.store.goals,
                   ),
-                  for (final block in session.blocks)
-                    Text(
-                      '${block.label ?? block.subtype} · ${block.durationMin == null ? '?' : '${block.durationMin} min'} · RPE ${block.rpe}',
-                    ),
-                  const SizedBox(height: 6),
-                ],
                 if (bundle.morning != null)
                   Text('Morning · ${_checkLine(bundle.morning!)}'),
                 if (bundle.evening != null)
                   Text('Evening · ${_checkLine(bundle.evening!)}'),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconTip(
-                        icon: Icons.calendar_view_day,
-                        message: 'Export day',
-                        onPressed: () => _exportDay(context, day),
-                      ),
-                      IconTip(
-                        icon: Icons.close,
-                        message: 'Close',
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
+                  child: IconTip(
+                    icon: Icons.close,
+                    message: 'Close',
+                    onPressed: () => Navigator.pop(context),
                   ),
                 ),
               ],

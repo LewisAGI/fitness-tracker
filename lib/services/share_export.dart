@@ -44,16 +44,25 @@ Future<void> offerExport(BuildContext context, ExportFiles files) {
   );
 }
 
-Future<void> shareExport(BuildContext context, ExportFiles files) async {
-  Rect? origin;
-  if (Platform.isIOS) {
-    final box = context.findRenderObject();
-    if (box is RenderBox && box.hasSize && box.size.width > 0) {
-      origin = box.localToGlobal(Offset.zero) & box.size;
-    } else {
-      origin = const Rect.fromLTWH(1, 1, 2, 2);
-    }
+Rect? _shareOrigin(BuildContext context) {
+  if (!Platform.isIOS) {
+    return null;
   }
+  final box = context.findRenderObject();
+  if (box is RenderBox && box.hasSize && box.size.width > 0) {
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+  return const Rect.fromLTWH(1, 1, 2, 2);
+}
+
+Future<void> shareText(BuildContext context, String text) async {
+  await SharePlus.instance.share(
+    ShareParams(text: text, sharePositionOrigin: _shareOrigin(context)),
+  );
+}
+
+Future<void> shareExport(BuildContext context, ExportFiles files) async {
+  final origin = _shareOrigin(context);
   final dir = await getTemporaryDirectory();
   final textFile = File('${dir.path}/fitness.txt');
   final jsonFile = File('${dir.path}/fitness-summary-v1.json');

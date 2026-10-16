@@ -56,11 +56,11 @@ The microphone and speech-recognition usage strings are in `ios/Runner/Info.plis
 
 ## Export
 
-Today can copy or share a workout, the day, the week, or the month. Settings does the week and the month. History does a day or one workout. The paste is one plain-text block: headings, dates, sets x reps x kg, RIR, runs in kilometres with pace, check-ins, and notes. Week and month blocks also include the balance check and the goal lines. The share sheet sends that text, plus `fitness.txt`, `fitness-summary-v1.json`, and `summary.md`.
+One share icon opens swipeable cards for a workout, the day, the week, or the month. Copy and Grok hand over one plain-text block: headings, dates, sets x reps x kg, RIR, runs in kilometres with pace, check-ins, and notes. Week and month blocks also include the balance check and the goal lines. Share sends that text, plus `fitness.txt`, `fitness-summary-v1.json`, and `summary.md`.
 
 ## Goals and balance
 
-Settings holds one or more goals: a target pace, a target lift, or a general goal (strength, fitness, hypertrophy). Strength suggestions use 3–6 reps and heavier steps. The weekly plan shows the balance of the week and the goal lines. The rules are in `docs/SPEC.md`.
+Settings holds one or more goals: a target pace, a target lift, or a general goal (strength, fitness, hypertrophy). Strength suggestions use 3–6 reps and heavier steps. The weekly plan shows push, pull, legs, and core bars, a load chart, and the goal lines. A lift goal has a ruler for the target. The rules are in `docs/SPEC.md`.
 
 ## Tests
 
